@@ -207,7 +207,7 @@ export async function createManualLead(input: {
   if (!input.phone.trim()) throw new Error("Phone is required.");
   return upsertImportedLead({
     source: "manual",
-    source_detail: "Manual / Instagram",
+    source_detail: "Bliss & Birch manual / Instagram",
     raw_stage: input.raw_stage || "Phone received",
     customer_name: input.customer_name || null,
     phone: input.phone,

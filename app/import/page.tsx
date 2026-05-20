@@ -7,7 +7,7 @@ export default function ImportPage() {
         <div>
           <div className="eyebrow">Import</div>
           <h1>Browser lead upload</h1>
-          <p className="subtle">Shiprocket Engage 360 product-view leads enter as P3 nurture leads and remain visible separately as browser leads.</p>
+          <p className="subtle">Upload Bliss & Birch product-view leads from Shiprocket Engage 360 as nurture enquiries.</p>
         </div>
       </div>
       <CsvImportForm />

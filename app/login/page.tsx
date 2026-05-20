@@ -10,9 +10,9 @@ export default async function LoginPage() {
     <main className="login-page">
       <section className="panel login-panel">
         <div>
-          <div className="eyebrow">Lead Recovery CRM</div>
+          <div className="eyebrow">Bliss & Birch</div>
           <h1>Sign in</h1>
-          <p className="subtle">Use the email and password created by the admin.</p>
+          <p className="subtle">Sign in to manage checkout recovery and customer follow-ups.</p>
         </div>
         <LoginForm />
       </section>

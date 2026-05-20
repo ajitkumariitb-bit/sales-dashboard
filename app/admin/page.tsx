@@ -26,8 +26,8 @@ export default async function AdminDashboard() {
       <div className="topbar">
         <div>
           <div className="eyebrow">Admin</div>
-          <h1>Recovery command center</h1>
-          <p className="subtle">A measured view of abandoned cart, browser lead, follow-up, and conversion performance.</p>
+          <h1>Bliss & Birch recovery desk</h1>
+          <p className="subtle">Track abandoned checkouts, showroom-style enquiries, salesperson follow-ups, and recovered revenue.</p>
         </div>
         <div className="actions">
           <Link className="button" href="/leads">View all leads</Link>
@@ -116,7 +116,7 @@ export default async function AdminDashboard() {
         <div className="section-head">
           <div>
             <h2>Needs attention</h2>
-            <p className="subtle">Hot leads, missed follow-ups, WhatsApp-only touches, and open leads without a next step.</p>
+            <p className="subtle">High-intent product enquiries, missed follow-ups, WhatsApp-only touches, and open leads without a next step.</p>
           </div>
         </div>
         <LeadTable leads={attentionLeads} users={users} canAssign />

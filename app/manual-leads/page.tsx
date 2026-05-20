@@ -11,8 +11,8 @@ export default async function ManualLeadsPage() {
       <div className="topbar">
         <div>
           <div className="eyebrow">Admin</div>
-          <h1>Manual lead</h1>
-          <p className="subtle">Add Instagram, referral, call, or offline enquiries into the same follow-up system.</p>
+          <h1>Manual Bliss & Birch lead</h1>
+          <p className="subtle">Add Instagram DMs, architect enquiries, referral calls, and offline lighting/fan leads.</p>
         </div>
       </div>
       <ManualLeadForm users={users} />

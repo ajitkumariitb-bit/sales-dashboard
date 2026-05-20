@@ -42,8 +42,8 @@ export default async function SalespersonDashboard() {
       <div className="topbar">
         <div>
           <div className="eyebrow">Salesperson</div>
-          <h1>{user.name}'s recovery queue</h1>
-          <p className="subtle">Only assigned leads are shown. INIT leads are hidden by default.</p>
+          <h1>{user.name}'s Bliss & Birch queue</h1>
+          <p className="subtle">Assigned lighting, fan, and decor enquiries. INIT leads are hidden by default.</p>
         </div>
         <Link className="button primary" href="/leads">Open lead list</Link>
       </div>

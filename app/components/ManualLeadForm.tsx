@@ -33,7 +33,7 @@ export function ManualLeadForm({ users }: { users: AppUser[] }) {
     <form action={submit} className="panel grid">
       <div>
         <h2>Create manual lead</h2>
-        <p className="subtle">Use this for Instagram DMs, walk-ins, referrals, or direct phone enquiries.</p>
+        <p className="subtle">Use this for Instagram DMs, walk-ins, architect/interior leads, referrals, or direct phone enquiries.</p>
       </div>
       <div className="form-grid">
         <label className="field">
@@ -67,7 +67,7 @@ export function ManualLeadForm({ users }: { users: AppUser[] }) {
         </label>
         <label className="field full">
           <span>Product / requirement</span>
-          <input name="product_names" placeholder="Example: Chandelier fan, table lamp, bulk lighting enquiry" />
+          <input name="product_names" placeholder="Example: Chandelier fan, table lamp, wall lights, bulk lighting enquiry" />
         </label>
         <label className="field">
           <span>Product URL</span>

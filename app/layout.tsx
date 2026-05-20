@@ -6,8 +6,8 @@ import { getOptionalCurrentUser } from "@/lib/store";
 import { LogoutButton } from "./components/LogoutButton";
 
 export const metadata: Metadata = {
-  title: "Lead Recovery CRM",
-  description: "Abandoned cart and browser lead recovery dashboard"
+  title: "Bliss & Birch Lead Recovery",
+  description: "Bliss & Birch abandoned checkout and sales follow-up dashboard"
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
@@ -26,8 +26,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <div className="shell">
           <aside className="sidebar">
-            <div className="brand">Lead Recovery CRM</div>
-            <div className="brand-sub">Meta ads, Shopify checkout, and measurable sales follow-ups.</div>
+            <div className="brand">Bliss & Birch</div>
+            <div className="brand-sub">Lead recovery for lighting, fans, and premium home decor enquiries.</div>
             <nav className="nav">
               {currentUser.role === "admin" ? <Link href="/admin">Admin Dashboard</Link> : null}
               <Link href="/sales">Salesperson Dashboard</Link>
