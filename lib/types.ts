@@ -109,6 +109,7 @@ export type FollowupTask = {
 };
 
 export type LeadFilters = {
+  phoneSearch?: string;
   priority?: string;
   rawStage?: string;
   normalizedStage?: string;
@@ -118,6 +119,8 @@ export type LeadFilters = {
   cityState?: string;
   cartMin?: number;
   cartMax?: number;
+  dateFrom?: string;
+  dateTo?: string;
   dueToday?: boolean;
   missedFollowup?: boolean;
   untouchedHot?: boolean;

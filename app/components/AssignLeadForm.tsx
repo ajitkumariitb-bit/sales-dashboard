@@ -64,7 +64,7 @@ export function BulkAssignForm({ users }: { users: AppUser[] }) {
     <form action={submit} className="panel grid" style={{ marginBottom: 16 }}>
       <div>
         <h2>Bulk assignment</h2>
-        <p className="subtle">Assign unassigned leads by priority or stage. Start with P1 hot leads.</p>
+        <p className="subtle">Assign unassigned leads by priority, stage, order value, or created date. Start with P1 hot leads.</p>
       </div>
       <div className="filters">
         <label className="field">
@@ -94,6 +94,22 @@ export function BulkAssignForm({ users }: { users: AppUser[] }) {
             <option>OTP verified</option>
             <option>Phone received</option>
           </select>
+        </label>
+        <label className="field">
+          <span>Cart value min</span>
+          <input name="cart_min" type="number" min="0" placeholder="Any" />
+        </label>
+        <label className="field">
+          <span>Cart value max</span>
+          <input name="cart_max" type="number" min="0" placeholder="Any" />
+        </label>
+        <label className="field">
+          <span>Created from</span>
+          <input name="date_from" type="date" />
+        </label>
+        <label className="field">
+          <span>Created to</span>
+          <input name="date_to" type="date" />
         </label>
         <label className="field">
           <span>Limit</span>

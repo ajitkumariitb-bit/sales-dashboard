@@ -20,6 +20,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   const params = await searchParams;
   const [currentUser, users] = await Promise.all([getCurrentUser(), getUsers()]);
   const filters = {
+    phoneSearch: value(params, "phoneSearch"),
     priority: value(params, "priority"),
     rawStage: value(params, "rawStage"),
     normalizedStage: value(params, "normalizedStage"),
@@ -29,6 +30,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     cityState: value(params, "cityState"),
     cartMin: numberValue(params, "cartMin"),
     cartMax: numberValue(params, "cartMax"),
+    dateFrom: value(params, "dateFrom"),
+    dateTo: value(params, "dateTo"),
     dueToday: value(params, "dueToday") === "on",
     missedFollowup: value(params, "missedFollowup") === "on",
     untouchedHot: value(params, "untouchedHot") === "on"
@@ -64,6 +67,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
 
       <form className="panel" style={{ marginBottom: 16 }}>
         <div className="filters">
+          <label className="field">
+            <span>Phone number</span>
+            <input name="phoneSearch" inputMode="numeric" defaultValue={filters.phoneSearch ?? ""} />
+          </label>
           <label className="field">
             <span>Priority</span>
             <select name="priority" defaultValue={filters.priority ?? ""}>
@@ -132,6 +139,14 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
           <label className="field">
             <span>Cart value max</span>
             <input name="cartMax" type="number" min="0" defaultValue={filters.cartMax ?? ""} />
+          </label>
+          <label className="field">
+            <span>Created from</span>
+            <input name="dateFrom" type="date" defaultValue={filters.dateFrom ?? ""} />
+          </label>
+          <label className="field">
+            <span>Created to</span>
+            <input name="dateTo" type="date" defaultValue={filters.dateTo ?? ""} />
           </label>
           <label className="field">
             <span>Due today</span>

@@ -14,6 +14,10 @@ export async function POST(request: Request) {
         assigned_to: String(body.assigned_to),
         priority: body.priority || undefined,
         normalized_stage: body.normalized_stage || undefined,
+        cart_min: numericValue(body.cart_min),
+        cart_max: numericValue(body.cart_max),
+        date_from: body.date_from || undefined,
+        date_to: body.date_to || undefined,
         limit: Number(body.limit ?? 100)
       });
       return NextResponse.json(result);
@@ -24,4 +28,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Assignment failed." }, { status: 400 });
   }
+}
+
+function numericValue(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }

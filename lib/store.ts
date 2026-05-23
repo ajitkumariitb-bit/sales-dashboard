@@ -66,6 +66,14 @@ function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function startOfDate(value: string) {
+  return new Date(`${value}T00:00:00.000`).toISOString();
+}
+
+function endOfDate(value: string) {
+  return new Date(`${value}T23:59:59.999`).toISOString();
+}
+
 export async function getCurrentUser(): Promise<AppUser> {
   const user = await getOptionalCurrentUser();
   if (!user) throw new Error("Not authenticated.");
@@ -154,6 +162,10 @@ export async function bulkAssignLeads(input: {
   assigned_to: string;
   priority?: string;
   normalized_stage?: string;
+  cart_min?: number;
+  cart_max?: number;
+  date_from?: string;
+  date_to?: string;
   limit?: number;
 }) {
   const limit = Math.min(1000, Math.max(1, input.limit ?? 100));
@@ -163,6 +175,10 @@ export async function bulkAssignLeads(input: {
     let query = supabaseAdmin().from("leads").select("id").is("assigned_to", null);
     if (input.priority) query = query.eq("priority", input.priority);
     if (input.normalized_stage) query = query.eq("normalized_stage", input.normalized_stage);
+    if (typeof input.cart_min === "number") query = query.gte("cart_value", input.cart_min);
+    if (typeof input.cart_max === "number") query = query.lte("cart_value", input.cart_max);
+    if (input.date_from) query = query.gte("first_seen_at", startOfDate(input.date_from));
+    if (input.date_to) query = query.lte("first_seen_at", endOfDate(input.date_to));
     const { data, error } = await query.order("lead_score", { ascending: false }).limit(limit);
     if (error) throw error;
     const ids = (data ?? []).map((row) => row.id);
@@ -182,6 +198,10 @@ export async function bulkAssignLeads(input: {
     if (lead.assigned_to) continue;
     if (input.priority && lead.priority !== input.priority) continue;
     if (input.normalized_stage && lead.normalized_stage !== input.normalized_stage) continue;
+    if (typeof input.cart_min === "number" && (lead.cart_value ?? 0) < input.cart_min) continue;
+    if (typeof input.cart_max === "number" && (lead.cart_value ?? 0) > input.cart_max) continue;
+    if (input.date_from && new Date(lead.first_seen_at).getTime() < new Date(startOfDate(input.date_from)).getTime()) continue;
+    if (input.date_to && new Date(lead.first_seen_at).getTime() > new Date(endOfDate(input.date_to)).getTime()) continue;
     lead.assigned_to = input.assigned_to;
     lead.updated_at = now;
     assigned += 1;
@@ -269,6 +289,10 @@ export async function getLeadsResult(
       query = query.ilike("raw_stage", `%${filters.rawStage}%`);
       countQuery = countQuery.ilike("raw_stage", `%${filters.rawStage}%`);
     }
+    if (filters.phoneSearch) {
+      query = query.ilike("phone", `%${filters.phoneSearch}%`);
+      countQuery = countQuery.ilike("phone", `%${filters.phoneSearch}%`);
+    }
     if (filters.cityState) {
       query = query.or(`city.ilike.%${filters.cityState}%,state.ilike.%${filters.cityState}%`);
       countQuery = countQuery.or(`city.ilike.%${filters.cityState}%,state.ilike.%${filters.cityState}%`);
@@ -280,6 +304,14 @@ export async function getLeadsResult(
     if (typeof filters.cartMax === "number") {
       query = query.lte("cart_value", filters.cartMax);
       countQuery = countQuery.lte("cart_value", filters.cartMax);
+    }
+    if (filters.dateFrom) {
+      query = query.gte("first_seen_at", startOfDate(filters.dateFrom));
+      countQuery = countQuery.gte("first_seen_at", startOfDate(filters.dateFrom));
+    }
+    if (filters.dateTo) {
+      query = query.lte("first_seen_at", endOfDate(filters.dateTo));
+      countQuery = countQuery.lte("first_seen_at", endOfDate(filters.dateTo));
     }
     if (filters.dueToday) {
       query = query.gte("next_follow_up_at", startOfToday().toISOString()).lte("next_follow_up_at", endOfToday().toISOString());
@@ -319,12 +351,15 @@ export async function getLeadsResult(
   if (filters.assignedTo) result = result.filter((lead) => lead.assigned_to === filters.assignedTo);
   if (filters.status) result = result.filter((lead) => lead.current_status === filters.status);
   if (filters.rawStage) result = result.filter((lead) => (lead.raw_stage ?? "").toLowerCase().includes(filters.rawStage!.toLowerCase()));
+  if (filters.phoneSearch) result = result.filter((lead) => lead.phone.includes(filters.phoneSearch!));
   if (filters.cityState) {
     const value = filters.cityState.toLowerCase();
     result = result.filter((lead) => `${lead.city ?? ""} ${lead.state ?? ""}`.toLowerCase().includes(value));
   }
   if (typeof filters.cartMin === "number") result = result.filter((lead) => (lead.cart_value ?? 0) >= filters.cartMin!);
   if (typeof filters.cartMax === "number") result = result.filter((lead) => (lead.cart_value ?? 0) <= filters.cartMax!);
+  if (filters.dateFrom) result = result.filter((lead) => new Date(lead.first_seen_at).getTime() >= new Date(startOfDate(filters.dateFrom!)).getTime());
+  if (filters.dateTo) result = result.filter((lead) => new Date(lead.first_seen_at).getTime() <= new Date(endOfDate(filters.dateTo!)).getTime());
   if (filters.dueToday) result = result.filter((lead) => isToday(lead.next_follow_up_at));
   if (filters.missedFollowup) result = result.filter((lead) => isPast(lead.next_follow_up_at) && !["converted", "lost"].includes(lead.current_status));
   if (filters.untouchedHot) result = result.filter((lead) => lead.priority === "P1 Hot" && !lead.last_contacted_at);
