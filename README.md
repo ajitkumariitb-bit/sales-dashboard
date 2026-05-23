@@ -1,16 +1,17 @@
-# Lead Recovery CRM
+# Bliss & Birch Lead Recovery CRM
 
-Next.js CRM/dashboard for ecommerce abandoned cart recovery, Shopify checkout stage tracking, Google Sheet sync, and Shiprocket Engage 360 browser lead imports.
+Next.js CRM/dashboard for Bliss & Birch abandoned checkout recovery, Shopify/Fastrr stage tracking, Google Sheet sync, and Shiprocket Engage 360 browser lead imports.
 
 ## What Is Included
 
 - Admin dashboard with recovery metrics, SLA risks, anti-fake performance checks, and salesperson leaderboard.
 - Salesperson dashboard showing only assigned leads, with INIT hidden by default and leads sorted by checkout intent.
-- Lead list with priority, stage, source, owner, status, location, cart value, follow-up, missed follow-up, and untouched hot lead filters.
+- Lead list with phone number, priority, stage, source, owner, status, location, cart value, created date, follow-up, missed follow-up, and untouched hot lead filters.
 - Lead detail page with customer/cart data, checkout and recovery URLs, stage/priority badges, activity timeline, follow-up history, quick call/WhatsApp links, and admin conversion capture.
 - Activity logging that requires outcome and note, updates touch counts automatically, timestamps every action, and requires a next follow-up for outcomes that need another touch.
 - Shiprocket CSV upload for browser leads, scored as P3 nurture leads.
 - Google Sheet sync endpoint for abandoned cart rows with flexible column mapping and phone + checkout URL de-duplication.
+- Shopify paid order sync endpoint that matches orders by phone/email and marks open leads as converted.
 - Supabase migrations and seed data for every required stage.
 - Vercel cron config for 30-minute Google Sheet sync.
 
@@ -70,6 +71,25 @@ POST /api/sync/google-sheet
 When `SYNC_SECRET` is present, send it as the `x-sync-secret` header. `vercel.json` schedules the endpoint every 30 minutes.
 
 Flexible sheet columns are supported for phone, name, email, cart value, checkout URL, recovery URL, stage, product details, city/state, and created date.
+
+## Shopify Order Sync
+
+Set these variables:
+
+```bash
+SHOPIFY_STORE_DOMAIN=
+SHOPIFY_ADMIN_ACCESS_TOKEN=
+SHOPIFY_API_VERSION=2025-10
+SHOPIFY_ORDER_SYNC_DAYS=14
+```
+
+The sync route is:
+
+```text
+POST /api/sync/shopify-orders
+```
+
+It reads paid and partially paid Shopify orders starting from the earliest lead date in the CRM, matches leads by phone number or email, creates a recovered order record, and marks the matching lead as converted. `SHOPIFY_ORDER_SYNC_DAYS` is only used as a fallback when there are no leads yet. If `SYNC_SECRET` is present, send it as the `x-sync-secret` header.
 
 ## Shiprocket CSV Import
 

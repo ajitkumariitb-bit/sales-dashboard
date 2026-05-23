@@ -8,6 +8,7 @@ export function middleware(request: NextRequest) {
   if (
     publicPaths.some((path) => pathname.startsWith(path)) ||
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/sync") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico"
   ) {
