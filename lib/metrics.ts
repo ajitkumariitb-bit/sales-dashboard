@@ -47,7 +47,9 @@ export function leaderboard(input: {
     const contactedLeadIds = new Set(userActivities.map((activity) => activity.lead_id));
     const connectedCalls = userActivities.filter((activity) => activity.activity_type === "call" && activity.outcome === "connected").length;
     const conversions = input.orders.filter((order) => order.converted_by === user.id);
+    const convertedLeadIds = new Set(conversions.map((order) => order.lead_id));
     const assignedConverted = assigned.filter((lead) => lead.current_status === "converted").length;
+    const conversionCount = convertedLeadIds.size || assignedConverted;
     const firstContactMinutes = assigned
       .filter((lead) => lead.last_contacted_at)
       .map((lead) => minutesBetween(lead.first_seen_at, lead.last_contacted_at!));
@@ -60,9 +62,9 @@ export function leaderboard(input: {
       connectedCalls,
       followupsCompleted: input.followups.filter((task) => task.assigned_to === user.id && task.status === "completed").length,
       missedFollowups: input.followups.filter((task) => task.assigned_to === user.id && (task.status === "missed" || (task.status === "pending" && isPast(task.due_at)))).length,
-      conversions: conversions.length || assignedConverted,
+      conversions: conversionCount,
       revenueRecovered: conversions.reduce((sum, order) => sum + order.recovered_revenue, 0),
-      conversionRate: assigned.length ? Math.round(((conversions.length || assignedConverted) / assigned.length) * 1000) / 10 : 0,
+      conversionRate: assigned.length ? Math.round((conversionCount / assigned.length) * 1000) / 10 : 0,
       averageTimeToFirstContact: firstContactMinutes.length
         ? Math.round(firstContactMinutes.reduce((sum, item) => sum + item, 0) / firstContactMinutes.length)
         : null,
