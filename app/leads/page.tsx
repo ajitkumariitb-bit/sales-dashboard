@@ -1,4 +1,5 @@
-import { getCurrentUser, getLeadsResult, getUsers } from "@/lib/store";
+import { recoveredRevenueByLead } from "@/lib/recovery";
+import { getCurrentUser, getLeads, getLeadsResult, getRecoveredOrders, getUsers } from "@/lib/store";
 import { BulkAssignForm } from "../components/AssignLeadForm";
 import { LeadTable } from "../components/LeadTable";
 
@@ -18,7 +19,12 @@ function numberValue(params: Record<string, string | string[] | undefined>, key:
 
 export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const [currentUser, users] = await Promise.all([getCurrentUser(), getUsers()]);
+  const [currentUser, users, allLeads, recoveredOrders] = await Promise.all([
+    getCurrentUser(),
+    getUsers(),
+    getLeads(),
+    getRecoveredOrders()
+  ]);
   const filters = {
     phoneSearch: value(params, "phoneSearch"),
     priority: value(params, "priority"),
@@ -42,6 +48,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
     pageSize: 100
   });
   const leads = leadResult.leads;
+  const recoveredRevenue = recoveredRevenueByLead(recoveredOrders);
   const totalPages = Math.max(1, Math.ceil(leadResult.total / leadResult.pageSize));
   const makePageHref = (nextPage: number) => {
     const search = new URLSearchParams();
@@ -188,7 +195,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         </div>
       </div>
 
-      <LeadTable leads={leads} users={users} canAssign={currentUser.role === "admin"} />
+      <LeadTable
+        leads={leads}
+        users={users}
+        canAssign={currentUser.role === "admin"}
+        recoveredRevenueByLead={recoveredRevenue}
+      />
     </>
   );
 }
