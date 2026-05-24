@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { assignLead, bulkAssignLeads, getCurrentUser } from "@/lib/store";
+import { assignLead, bulkAssignLeads, bulkUnassignLeads, getCurrentUser } from "@/lib/store";
 
 export async function POST(request: Request) {
   try {
@@ -9,6 +9,21 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
+    if (body.mode === "bulk_unassign") {
+      const result = await bulkUnassignLeads({
+        assigned_to: body.assigned_to || undefined,
+        priority: body.priority || undefined,
+        normalized_stage: body.normalized_stage || undefined,
+        cart_min: numericValue(body.cart_min),
+        cart_max: numericValue(body.cart_max),
+        date_from: body.date_from || undefined,
+        date_to: body.date_to || undefined,
+        only_untouched: body.only_untouched === "on" || body.only_untouched === true,
+        limit: Number(body.limit ?? 100)
+      });
+      return NextResponse.json(result);
+    }
+
     if (body.mode === "bulk") {
       const result = await bulkAssignLeads({
         assigned_to: String(body.assigned_to),
