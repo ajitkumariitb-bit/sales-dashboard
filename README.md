@@ -79,6 +79,8 @@ Set these variables:
 ```bash
 SHOPIFY_STORE_DOMAIN=
 SHOPIFY_ADMIN_ACCESS_TOKEN=
+SHOPIFY_CLIENT_ID=
+SHOPIFY_CLIENT_SECRET=
 SHOPIFY_API_VERSION=2025-10
 SHOPIFY_ORDER_SYNC_DAYS=14
 ```
@@ -88,6 +90,8 @@ The sync route is:
 ```text
 POST /api/sync/shopify-orders
 ```
+
+Use `SHOPIFY_ADMIN_ACCESS_TOKEN` if Shopify shows a token that starts with `shpat_`. If Shopify only shows Client ID and Client Secret in the Dev Dashboard, leave `SHOPIFY_ADMIN_ACCESS_TOKEN` blank and set `SHOPIFY_CLIENT_ID` plus `SHOPIFY_CLIENT_SECRET` instead.
 
 It reads paid and partially paid Shopify orders starting from the earliest lead date in the CRM, matches leads by phone number or email, creates a recovered order record, and marks the matching lead as converted. `SHOPIFY_ORDER_SYNC_DAYS` is only used as a fallback when there are no leads yet. If `SYNC_SECRET` is present, send it as the `x-sync-secret` header.
 
