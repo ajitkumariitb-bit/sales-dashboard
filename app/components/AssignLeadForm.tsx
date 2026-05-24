@@ -45,18 +45,24 @@ export function BulkAssignForm({ users }: { users: AppUser[] }) {
   async function submit(formData: FormData) {
     setBusy(true);
     setMessage("");
+    const mode = String(formData.get("mode") ?? "bulk");
+    const body = Object.fromEntries(formData.entries());
+    const payload =
+      mode === "bulk_unassign"
+        ? { ...body, mode, assigned_to: formData.get("unassign_assigned_to") || undefined }
+        : { ...body, mode, assigned_to: formData.get("assign_to") };
     const response = await fetch("/api/admin/assign-lead", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "bulk", ...Object.fromEntries(formData.entries()) })
+      body: JSON.stringify(payload)
     });
     const data = await response.json();
     setBusy(false);
     if (!response.ok) {
-      setMessage(data.error ?? "Bulk assignment failed.");
+      setMessage(data.error ?? "Bulk action failed.");
       return;
     }
-    setMessage(`Assigned ${data.assigned} leads.`);
+    setMessage(mode === "bulk_unassign" ? `Unassigned ${data.unassigned} leads.` : `Assigned ${data.assigned} leads.`);
     router.refresh();
   }
 
@@ -68,8 +74,17 @@ export function BulkAssignForm({ users }: { users: AppUser[] }) {
       </div>
       <div className="filters">
         <label className="field">
-          <span>Salesperson</span>
-          <select name="assigned_to" required>
+          <span>Assign to</span>
+          <select name="assign_to" required>
+            {users.filter((user) => user.role === "salesperson").map((user) => (
+              <option key={user.id} value={user.id}>{user.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Unassign from</span>
+          <select name="unassign_assigned_to" defaultValue="">
+            <option value="">Any salesperson</option>
             {users.filter((user) => user.role === "salesperson").map((user) => (
               <option key={user.id} value={user.id}>{user.name}</option>
             ))}
@@ -117,8 +132,17 @@ export function BulkAssignForm({ users }: { users: AppUser[] }) {
         </label>
       </div>
       <div className="actions">
-        <button className="button primary" type="submit" disabled={busy}>
+        <button className="button primary" type="submit" name="mode" value="bulk" disabled={busy}>
           {busy ? "Assigning..." : "Assign leads"}
+        </button>
+        <button
+          className="button"
+          type="submit"
+          name="mode"
+          value="bulk_unassign"
+          disabled={busy}
+        >
+          {busy ? "Working..." : "Unassign matching leads"}
         </button>
         {message ? <span className="subtle">{message}</span> : null}
       </div>
