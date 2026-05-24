@@ -210,6 +210,63 @@ export async function bulkAssignLeads(input: {
   return { assigned };
 }
 
+export async function bulkUnassignLeads(input: {
+  assigned_to?: string;
+  priority?: string;
+  normalized_stage?: string;
+  cart_min?: number;
+  cart_max?: number;
+  date_from?: string;
+  date_to?: string;
+  only_untouched?: boolean;
+  limit?: number;
+}) {
+  const limit = Math.min(1000, Math.max(1, input.limit ?? 100));
+  const now = new Date().toISOString();
+
+  if (hasSupabaseConfig()) {
+    let query = supabaseAdmin().from("leads").select("id").not("assigned_to", "is", null);
+    if (input.assigned_to) query = query.eq("assigned_to", input.assigned_to);
+    if (input.priority) query = query.eq("priority", input.priority);
+    if (input.normalized_stage) query = query.eq("normalized_stage", input.normalized_stage);
+    if (typeof input.cart_min === "number") query = query.gte("cart_value", input.cart_min);
+    if (typeof input.cart_max === "number") query = query.lte("cart_value", input.cart_max);
+    if (input.date_from) query = query.gte("first_seen_at", startOfDate(input.date_from));
+    if (input.date_to) query = query.lte("first_seen_at", endOfDate(input.date_to));
+    if (input.only_untouched) query = query.eq("total_touch_count", 0);
+    const { data, error } = await query.order("lead_score", { ascending: false }).limit(limit);
+    if (error) throw error;
+    const ids = (data ?? []).map((row) => row.id);
+    if (ids.length === 0) return { unassigned: 0 };
+    const { error: updateError } = await supabaseAdmin()
+      .from("leads")
+      .update({ assigned_to: null, updated_at: now })
+      .in("id", ids);
+    if (updateError) throw updateError;
+    return { unassigned: ids.length };
+  }
+
+  syncLocalDbFromDisk();
+  let unassigned = 0;
+  for (const lead of sortLeads(leads)) {
+    if (unassigned >= limit) break;
+    if (!lead.assigned_to) continue;
+    if (input.assigned_to && lead.assigned_to !== input.assigned_to) continue;
+    if (input.priority && lead.priority !== input.priority) continue;
+    if (input.normalized_stage && lead.normalized_stage !== input.normalized_stage) continue;
+    if (typeof input.cart_min === "number" && (lead.cart_value ?? 0) < input.cart_min) continue;
+    if (typeof input.cart_max === "number" && (lead.cart_value ?? 0) > input.cart_max) continue;
+    if (input.date_from && new Date(lead.first_seen_at).getTime() < new Date(startOfDate(input.date_from)).getTime()) continue;
+    if (input.date_to && new Date(lead.first_seen_at).getTime() > new Date(endOfDate(input.date_to)).getTime()) continue;
+    if (input.only_untouched && lead.total_touch_count > 0) continue;
+    lead.assigned_to = null;
+    lead.updated_at = now;
+    unassigned += 1;
+  }
+  saveLocalDbToDisk();
+  return { unassigned };
+}
+
 export async function createManualLead(input: {
   customer_name?: string | null;
   phone: string;
