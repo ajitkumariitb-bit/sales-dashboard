@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatCurrency } from "@/lib/date";
 import { dashboardMetrics, leaderboard } from "@/lib/metrics";
+import { recoveredRevenueByLead } from "@/lib/recovery";
 import { getActivities, getCurrentUser, getFollowups, getLeads, getRecoveredOrders, getUsers } from "@/lib/store";
 import { LeadTable } from "../components/LeadTable";
 import { StatCard } from "../components/StatCard";
@@ -23,6 +24,7 @@ export default async function AdminDashboard() {
   const dashboardActivities = activities.filter((activity) => dashboardLeadIds.has(activity.lead_id));
   const dashboardFollowups = followups.filter((followup) => dashboardLeadIds.has(followup.lead_id));
   const dashboardOrders = orders.filter((order) => dashboardLeadIds.has(order.lead_id));
+  const recoveredRevenue = recoveredRevenueByLead(orders);
   const metrics = dashboardMetrics({
     leads: dashboardLeads,
     activities: dashboardActivities,
@@ -138,7 +140,7 @@ export default async function AdminDashboard() {
             <p className="subtle">High-intent product enquiries, missed follow-ups, WhatsApp-only touches, and open leads without a next step.</p>
           </div>
         </div>
-        <LeadTable leads={attentionLeads} users={users} canAssign />
+        <LeadTable leads={attentionLeads} users={users} canAssign recoveredRevenueByLead={recoveredRevenue} />
       </section>
     </>
   );
