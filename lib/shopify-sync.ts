@@ -170,11 +170,18 @@ async function convertMatchingLead(client: SupabaseClient, order: ShopifyOrder, 
   const orderId = String(order.name || order.id);
   const { data: existingOrder, error: existingError } = await client
     .from("orders_recovered")
-    .select("id")
+    .select("id, lead_id")
     .eq("order_id", orderId)
     .maybeSingle();
   if (existingError) throw existingError;
-  if (existingOrder) return "skipped";
+  if (existingOrder) {
+    const existingLead = await findLeadById(client, existingOrder.lead_id);
+    if (existingLead) {
+      await closeRelatedCustomerLeads(client, existingLead, existingLead.assigned_to ?? actor.id, new Date().toISOString(), orderId);
+      return "matched";
+    }
+    return "skipped";
+  }
 
   const lead = await findLeadForOrder(client, order);
   if (!lead) return "skipped";
@@ -316,6 +323,16 @@ async function findLeadForOrder(client: SupabaseClient, order: ShopifyOrder) {
     if (b.lead_score !== a.lead_score) return b.lead_score - a.lead_score;
     return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
   })[0] ?? null;
+}
+
+async function findLeadById(client: SupabaseClient, leadId: string) {
+  const { data, error } = await client
+    .from("leads")
+    .select("*, assigned_user:users(*)")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Lead | null) ?? null;
 }
 
 function orderPhones(order: ShopifyOrder) {
