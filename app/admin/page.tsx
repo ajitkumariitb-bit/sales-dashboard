@@ -6,6 +6,7 @@ import { LeadTable } from "../components/LeadTable";
 import { StatCard } from "../components/StatCard";
 import { redirect } from "next/navigation";
 import { DedupeButton } from "../components/DedupeButton";
+import { SyncPanel } from "../components/SyncPanel";
 
 export default async function AdminDashboard() {
   const [currentUser, users, leads, activities, followups, orders] = await Promise.all([
@@ -51,6 +52,8 @@ export default async function AdminDashboard() {
           <Link className="button primary" href="/import">Import browser leads</Link>
         </div>
       </div>
+
+      <SyncPanel />
 
       <section className="panel" style={{ marginBottom: 18 }}>
         <div className="section-head">
