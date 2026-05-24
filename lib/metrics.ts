@@ -1,4 +1,5 @@
 import { isPast, isToday, minutesBetween } from "./date";
+import { uniqueConvertedCustomerCount } from "./recovery";
 import type { Activity, AppUser, FollowupTask, Lead, RecoveredOrder } from "./types";
 
 export function dashboardMetrics(input: {
@@ -9,7 +10,7 @@ export function dashboardMetrics(input: {
 }) {
   const { leads, activities, followups, orders } = input;
   const totalLeadsToday = leads.filter((lead) => isToday(lead.first_seen_at)).length;
-  const conversions = leads.filter((lead) => lead.current_status === "converted").length;
+  const conversions = uniqueConvertedCustomerCount(leads);
   const recoveredRevenue = orders.reduce((sum, order) => sum + order.recovered_revenue, 0);
   const connectedCalls = activities.filter((activity) => activity.activity_type === "call" && activity.outcome === "connected").length;
   const callsAttempted = leads.reduce((sum, lead) => sum + lead.total_call_attempts, 0);
@@ -48,7 +49,7 @@ export function leaderboard(input: {
     const connectedCalls = userActivities.filter((activity) => activity.activity_type === "call" && activity.outcome === "connected").length;
     const conversions = input.orders.filter((order) => order.converted_by === user.id);
     const convertedLeadIds = new Set(conversions.map((order) => order.lead_id));
-    const assignedConverted = assigned.filter((lead) => lead.current_status === "converted").length;
+    const assignedConverted = uniqueConvertedCustomerCount(assigned);
     const conversionCount = convertedLeadIds.size || assignedConverted;
     const firstContactMinutes = assigned
       .filter((lead) => lead.last_contacted_at)
