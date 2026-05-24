@@ -38,6 +38,7 @@ export async function syncShopifyOrders() {
   const storeDomain = normalizeStoreDomain(process.env.SHOPIFY_STORE_DOMAIN);
   const apiVersion = process.env.SHOPIFY_API_VERSION || "2025-10";
   const days = Math.min(90, Math.max(1, Number(process.env.SHOPIFY_ORDER_SYNC_DAYS ?? 14) || 14));
+  const pageSize = Math.min(100, Math.max(10, Number(process.env.SHOPIFY_ORDER_SYNC_PAGE_SIZE ?? 25) || 25));
 
   if (!storeDomain) throw new Error("SHOPIFY_STORE_DOMAIN is not set.");
   const accessToken = await getShopifyAccessToken(storeDomain);
@@ -51,48 +52,53 @@ export async function syncShopifyOrders() {
   let matched = 0;
   let converted = 0;
   let skipped = 0;
-  const firstPageUrls = [
-    buildOrdersUrl(storeDomain, apiVersion, createdAtMin, "paid"),
-    buildOrdersUrl(storeDomain, apiVersion, createdAtMin, "partially_paid")
-  ];
+  let hasMore = false;
+  const financialStatuses = ["paid", "partially_paid"] as const;
   const checkedOrderIds = new Set<string>();
 
-  for (const firstPageUrl of firstPageUrls) {
-    let nextUrl: string | null = firstPageUrl;
+  for (const financialStatus of financialStatuses) {
+    const cursorKey = `shopify_orders_${financialStatus}_next_url`;
+    const syncUrl =
+      (await getSyncCursor(client, cursorKey)) ??
+      buildOrdersUrl(storeDomain, apiVersion, createdAtMin, financialStatus, pageSize);
 
-    while (nextUrl) {
-      const response = await fetch(nextUrl, {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json"
-        }
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Shopify sync failed: ${response.status} ${detail.slice(0, 200)}`);
+    const response = await fetch(syncUrl, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json"
       }
+    });
 
-      const payload = (await response.json()) as ShopifyOrdersResponse;
-      for (const order of payload.orders ?? []) {
-        const orderKey = String(order.id);
-        if (checkedOrderIds.has(orderKey)) continue;
-        checkedOrderIds.add(orderKey);
-        ordersChecked += 1;
-        const result = await convertMatchingLead(client, order, actor);
-        if (result === "converted") {
-          matched += 1;
-          converted += 1;
-        }
-        if (result === "matched") matched += 1;
-        if (result === "skipped") skipped += 1;
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Shopify sync failed: ${response.status} ${detail.slice(0, 200)}`);
+    }
+
+    const payload = (await response.json()) as ShopifyOrdersResponse;
+    for (const order of payload.orders ?? []) {
+      const orderKey = String(order.id);
+      if (checkedOrderIds.has(orderKey)) continue;
+      checkedOrderIds.add(orderKey);
+      ordersChecked += 1;
+      const result = await convertMatchingLead(client, order, actor);
+      if (result === "converted") {
+        matched += 1;
+        converted += 1;
       }
+      if (result === "matched") matched += 1;
+      if (result === "skipped") skipped += 1;
+    }
 
-      nextUrl = nextPageUrl(response.headers.get("link"));
+    const nextUrl = nextPageUrl(response.headers.get("link"));
+    if (nextUrl) {
+      hasMore = true;
+      await saveSyncCursor(client, cursorKey, nextUrl);
+    } else {
+      await clearSyncCursor(client, cursorKey);
     }
   }
 
-  return { ordersChecked, matched, converted, skipped };
+  return { ordersChecked, matched, converted, skipped, hasMore };
 }
 
 function normalizeStoreDomain(value?: string) {
@@ -137,12 +143,18 @@ async function getShopifyAccessToken(storeDomain: string) {
   return cachedAccessToken;
 }
 
-function buildOrdersUrl(storeDomain: string, apiVersion: string, createdAtMin: string, financialStatus: "paid" | "partially_paid") {
+function buildOrdersUrl(
+  storeDomain: string,
+  apiVersion: string,
+  createdAtMin: string,
+  financialStatus: "paid" | "partially_paid",
+  pageSize: number
+) {
   const params = new URLSearchParams({
     status: "any",
     financial_status: financialStatus,
     created_at_min: createdAtMin,
-    limit: "250"
+    limit: String(pageSize)
   });
   return `https://${storeDomain}/admin/api/${apiVersion}/orders.json?${params.toString()}`;
 }
@@ -273,6 +285,26 @@ async function getConversionUser(client: SupabaseClient) {
   const { data: user, error: userError } = await client.from("users").select("*").limit(1).maybeSingle();
   if (userError) throw userError;
   return (user as AppUser | null) ?? null;
+}
+
+async function getSyncCursor(client: SupabaseClient, key: string) {
+  const { data, error } = await client.from("sync_state").select("value").eq("key", key).maybeSingle();
+  if (error) throw error;
+  return typeof data?.value === "string" ? data.value : null;
+}
+
+async function saveSyncCursor(client: SupabaseClient, key: string, value: string) {
+  const { error } = await client.from("sync_state").upsert({
+    key,
+    value,
+    updated_at: new Date().toISOString()
+  });
+  if (error) throw error;
+}
+
+async function clearSyncCursor(client: SupabaseClient, key: string) {
+  const { error } = await client.from("sync_state").delete().eq("key", key);
+  if (error) throw error;
 }
 
 async function getOrderSyncStart(client: SupabaseClient, fallbackDays: number) {
