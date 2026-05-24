@@ -191,8 +191,8 @@ async function convertMatchingLead(client: SupabaseClient, order: ShopifyOrder, 
     lead_id: lead.id,
     order_id: orderId,
     recovered_revenue: revenue,
-      converted_by: convertedBy,
-      converted_at: convertedAt
+    converted_by: convertedBy,
+    converted_at: convertedAt
   });
   if (insertError) throw insertError;
 
@@ -208,6 +208,8 @@ async function convertMatchingLead(client: SupabaseClient, order: ShopifyOrder, 
     if (leadError) throw leadError;
   }
 
+  await closeRelatedCustomerLeads(client, lead, convertedBy, now, orderId);
+
   await client.from("activities").insert({
     lead_id: lead.id,
     user_id: convertedBy,
@@ -221,6 +223,66 @@ async function convertMatchingLead(client: SupabaseClient, order: ShopifyOrder, 
   });
 
   return alreadyConverted ? "matched" : "converted";
+}
+
+async function closeRelatedCustomerLeads(
+  client: SupabaseClient,
+  lead: Lead,
+  convertedBy: string,
+  now: string,
+  orderId: string
+) {
+  const relatedIds = new Set<string>();
+  const phone = lastPhoneDigits(lead.phone);
+  const email = lead.email?.trim();
+
+  if (email) {
+    const { data, error } = await client
+      .from("leads")
+      .select("id")
+      .neq("id", lead.id)
+      .not("current_status", "in", "(converted,lost)")
+      .ilike("email", email);
+    if (error) throw error;
+    for (const row of data ?? []) relatedIds.add(row.id);
+  }
+
+  if (phone) {
+    const { data, error } = await client
+      .from("leads")
+      .select("id")
+      .neq("id", lead.id)
+      .not("current_status", "in", "(converted,lost)")
+      .ilike("phone", `%${phone}`);
+    if (error) throw error;
+    for (const row of data ?? []) relatedIds.add(row.id);
+  }
+
+  const ids = [...relatedIds];
+  if (ids.length === 0) return;
+
+  const { error: updateError } = await client
+    .from("leads")
+    .update({
+      current_status: "converted",
+      next_follow_up_at: null,
+      updated_at: now
+    })
+    .in("id", ids);
+  if (updateError) throw updateError;
+
+  const { error: activityError } = await client.from("activities").insert(
+    ids.map((leadId) => ({
+      lead_id: leadId,
+      user_id: convertedBy,
+      activity_type: "status_change",
+      outcome: "converted",
+      note: `Closed because this customer was recovered through Shopify order ${orderId}.`,
+      next_follow_up_at: null,
+      created_at: now
+    }))
+  );
+  if (activityError) throw activityError;
 }
 
 async function findLeadForOrder(client: SupabaseClient, order: ShopifyOrder) {
