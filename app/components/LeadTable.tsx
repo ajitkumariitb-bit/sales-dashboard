@@ -6,7 +6,17 @@ import type { AppUser } from "@/lib/types";
 import { AssignLeadForm } from "./AssignLeadForm";
 import { FlagBadge, PriorityBadge, StageBadge, StatusBadge } from "./Badges";
 
-export function LeadTable({ leads, users, canAssign = false }: { leads: Lead[]; users?: AppUser[]; canAssign?: boolean }) {
+export function LeadTable({
+  leads,
+  users,
+  canAssign = false,
+  recoveredRevenueByLead = {}
+}: {
+  leads: Lead[];
+  users?: AppUser[];
+  canAssign?: boolean;
+  recoveredRevenueByLead?: Record<string, number>;
+}) {
   return (
     <div className="table-wrap">
       <table>
@@ -18,6 +28,7 @@ export function LeadTable({ leads, users, canAssign = false }: { leads: Lead[]; 
             <th>Priority</th>
             <th>Product</th>
             <th>Cart value</th>
+            <th>Recovered</th>
             <th>Source</th>
             <th>Assigned</th>
             <th>Status</th>
@@ -28,7 +39,9 @@ export function LeadTable({ leads, users, canAssign = false }: { leads: Lead[]; 
           </tr>
         </thead>
         <tbody>
-          {leads.map((lead) => (
+          {leads.map((lead) => {
+            const recoveredRevenue = recoveredRevenueByLead[lead.id] ?? 0;
+            return (
             <tr key={lead.id}>
               <td>
                 <strong>{lead.customer_name ?? "Unknown"}</strong>
@@ -48,6 +61,13 @@ export function LeadTable({ leads, users, canAssign = false }: { leads: Lead[]; 
               <td>{lead.product_names ?? "No product"}</td>
               <td>{formatCurrency(lead.cart_value)}</td>
               <td>
+                {recoveredRevenue
+                  ? formatCurrency(recoveredRevenue)
+                  : lead.current_status === "converted"
+                    ? "Linked recovery"
+                    : "Not recovered"}
+              </td>
+              <td>
                 {lead.source.replace("_", " ")}
                 {lead.source_detail ? <div className="subtle">{lead.source_detail}</div> : null}
               </td>
@@ -64,10 +84,11 @@ export function LeadTable({ leads, users, canAssign = false }: { leads: Lead[]; 
               <td>{lead.total_touch_count}</td>
               <td><Link className="button" href={`/leads/${lead.id}`}>Open</Link></td>
             </tr>
-          ))}
+            );
+          })}
           {leads.length === 0 ? (
             <tr>
-              <td colSpan={13}>No leads match these filters.</td>
+              <td colSpan={14}>No leads match these filters.</td>
             </tr>
           ) : null}
         </tbody>
