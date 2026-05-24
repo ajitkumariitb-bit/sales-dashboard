@@ -29,16 +29,18 @@ type ShopifyOrdersResponse = {
 
 type SupabaseClient = ReturnType<typeof supabaseAdmin>;
 
+let cachedAccessToken: string | null = null;
+let cachedAccessTokenExpiresAt = 0;
+
 export async function syncShopifyOrders() {
   if (!hasSupabaseConfig()) throw new Error("Supabase is required for Shopify order sync.");
 
   const storeDomain = normalizeStoreDomain(process.env.SHOPIFY_STORE_DOMAIN);
-  const accessToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
   const apiVersion = process.env.SHOPIFY_API_VERSION || "2025-10";
   const days = Math.min(90, Math.max(1, Number(process.env.SHOPIFY_ORDER_SYNC_DAYS ?? 14) || 14));
 
   if (!storeDomain) throw new Error("SHOPIFY_STORE_DOMAIN is not set.");
-  if (!accessToken) throw new Error("SHOPIFY_ADMIN_ACCESS_TOKEN is not set.");
+  const accessToken = await getShopifyAccessToken(storeDomain);
 
   const client = supabaseAdmin();
   const actor = await getConversionUser(client);
@@ -95,6 +97,44 @@ export async function syncShopifyOrders() {
 
 function normalizeStoreDomain(value?: string) {
   return (value ?? "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
+}
+
+async function getShopifyAccessToken(storeDomain: string) {
+  const directToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  if (directToken) return directToken;
+
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("Set either SHOPIFY_ADMIN_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET.");
+  }
+
+  if (cachedAccessToken && Date.now() < cachedAccessTokenExpiresAt - 60_000) {
+    return cachedAccessToken;
+  }
+
+  const shop = storeDomain.replace(/\.myshopify\.com$/i, "");
+  const response = await fetch(`https://${shop}.myshopify.com/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: clientSecret
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Shopify token request failed: ${response.status} ${detail.slice(0, 200)}`);
+  }
+
+  const payload = (await response.json()) as { access_token?: string; expires_in?: number };
+  if (!payload.access_token) throw new Error("Shopify token response did not include an access token.");
+
+  cachedAccessToken = payload.access_token;
+  cachedAccessTokenExpiresAt = Date.now() + (payload.expires_in ?? 86_399) * 1000;
+  return cachedAccessToken;
 }
 
 function buildOrdersUrl(storeDomain: string, apiVersion: string, createdAtMin: string, financialStatus: "paid" | "partially_paid") {
