@@ -17,9 +17,25 @@ export default async function AdminDashboard() {
     getRecoveredOrders()
   ]);
   if (currentUser.role !== "admin") redirect("/sales");
-  const metrics = dashboardMetrics({ leads, activities, followups, orders });
-  const board = leaderboard({ users, leads, activities, followups, orders });
-  const attentionLeads = leads.filter((lead) => lead.priority === "P1 Hot" || !lead.next_follow_up_at).slice(0, 8);
+  const dashboardLeads = leads.filter((lead) => isWithinLastDays(lead.first_seen_at, 60));
+  const dashboardLeadIds = new Set(dashboardLeads.map((lead) => lead.id));
+  const dashboardActivities = activities.filter((activity) => dashboardLeadIds.has(activity.lead_id));
+  const dashboardFollowups = followups.filter((followup) => dashboardLeadIds.has(followup.lead_id));
+  const dashboardOrders = orders.filter((order) => dashboardLeadIds.has(order.lead_id));
+  const metrics = dashboardMetrics({
+    leads: dashboardLeads,
+    activities: dashboardActivities,
+    followups: dashboardFollowups,
+    orders: dashboardOrders
+  });
+  const board = leaderboard({
+    users,
+    leads: dashboardLeads,
+    activities: dashboardActivities,
+    followups: dashboardFollowups,
+    orders: dashboardOrders
+  });
+  const attentionLeads = dashboardLeads.filter((lead) => lead.priority === "P1 Hot" || !lead.next_follow_up_at).slice(0, 8);
 
   return (
     <>
@@ -47,7 +63,7 @@ export default async function AdminDashboard() {
       </section>
 
       <section className="grid stats-grid">
-        <StatCard label="Total synced leads" value={leads.length} />
+        <StatCard label="Synced leads, 60 days" value={dashboardLeads.length} />
         <StatCard label="Total leads today" value={metrics.totalLeadsToday} />
         <StatCard label="P1 hot leads" value={metrics.p1Hot} />
         <StatCard label="P2 warm leads" value={metrics.p2Warm} />
@@ -123,4 +139,9 @@ export default async function AdminDashboard() {
       </section>
     </>
   );
+}
+
+function isWithinLastDays(value: string, days: number) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return new Date(value).getTime() >= cutoff;
 }
