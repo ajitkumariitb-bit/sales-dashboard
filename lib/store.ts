@@ -383,14 +383,14 @@ export async function getLeadsResult(
       countQuery = countQuery.eq("priority", "P1 Hot").is("last_contacted_at", null);
     }
 
-    const orderByScore = query.order("lead_score", { ascending: false }).order("first_seen_at", { ascending: false });
+    const orderedQuery = applyLeadOrdering(query, filters);
     const { count, error: countError } = await countQuery;
     if (countError) throw countError;
     const leadsPage = options.all
-      ? await fetchSupabaseLeadPages(orderByScore)
-      : await fetchSupabaseLeadPage(orderByScore, (page - 1) * pageSize, page * pageSize - 1);
+      ? await fetchSupabaseLeadPages(orderedQuery)
+      : await fetchSupabaseLeadPage(orderedQuery, (page - 1) * pageSize, page * pageSize - 1);
     return {
-      leads: sortLeads(leadsPage, viewer),
+      leads: sortLeads(leadsPage, viewer, filters.sortBy, filters.sortDir),
       total: count ?? leadsPage.length,
       page,
       pageSize
@@ -421,20 +421,50 @@ export async function getLeadsResult(
   if (filters.missedFollowup) result = result.filter((lead) => isPast(lead.next_follow_up_at) && !["converted", "lost"].includes(lead.current_status));
   if (filters.untouchedHot) result = result.filter((lead) => lead.priority === "P1 Hot" && !lead.last_contacted_at);
 
-  const sorted = sortLeads(result, viewer);
+  const sorted = sortLeads(result, viewer, filters.sortBy, filters.sortDir);
   const pageLeads = options.all ? sorted : sorted.slice((page - 1) * pageSize, page * pageSize);
   return { leads: pageLeads, total: sorted.length, page, pageSize };
 }
 
-export function sortLeads(input: Lead[], viewer?: AppUser): Lead[] {
+export function sortLeads(input: Lead[], viewer?: AppUser, sortBy?: LeadFilters["sortBy"], sortDir: LeadFilters["sortDir"] = "desc"): Lead[] {
+  const direction = sortDir === "asc" ? 1 : -1;
   return [...input].sort((a, b) => {
-    if (viewer?.role === "salesperson") {
+    if (!sortBy && viewer?.role === "salesperson") {
       const intent = compareLeadIntent(a.normalized_stage, b.normalized_stage);
       if (intent !== 0) return intent;
+    }
+    if (sortBy === "date") {
+      return (new Date(a.first_seen_at).getTime() - new Date(b.first_seen_at).getTime()) * direction;
+    }
+    if (sortBy === "cart_value") {
+      const valueDiff = ((a.cart_value ?? 0) - (b.cart_value ?? 0)) * direction;
+      if (valueDiff !== 0) return valueDiff;
+      return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
+    }
+    if (sortBy === "priority") {
+      const priorityDiff = (a.lead_score - b.lead_score) * direction;
+      if (priorityDiff !== 0) return priorityDiff;
+      return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
     }
     if (b.lead_score !== a.lead_score) return b.lead_score - a.lead_score;
     return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
   });
+}
+
+function applyLeadOrdering<T extends { order: (column: string, options: { ascending: boolean; nullsFirst?: boolean }) => T }>(
+  query: T,
+  filters: LeadFilters
+) {
+  const sortBy = filters.sortBy ?? "date";
+  const ascending = filters.sortDir === "asc";
+
+  if (sortBy === "cart_value") {
+    return query.order("cart_value", { ascending, nullsFirst: false }).order("first_seen_at", { ascending: false });
+  }
+  if (sortBy === "priority") {
+    return query.order("lead_score", { ascending, nullsFirst: false }).order("first_seen_at", { ascending: false });
+  }
+  return query.order("first_seen_at", { ascending }).order("created_at", { ascending: false });
 }
 
 type SupabasePagedLeadQuery = {
@@ -930,11 +960,15 @@ function validateActivityInput(input: {
   }
 }
 
-export async function deduplicateLeads(mode: "phone_checkout" | "phone" = "phone_checkout") {
+export async function deduplicateLeads(mode: "phone_checkout" | "phone" | "recovered_customer" = "phone_checkout") {
   syncLocalDbFromDisk();
   const allLeads = hasSupabaseConfig()
     ? ((await supabaseAdmin().from("leads").select("*")).data as Lead[] | null) ?? []
     : leads;
+  const recovered = hasSupabaseConfig()
+    ? ((await supabaseAdmin().from("orders_recovered").select("*")).data as RecoveredOrder[] | null) ?? []
+    : recoveredOrders;
+  const recoveredLeadIds = new Set(recovered.map((order) => order.lead_id));
   const groups = new Map<string, Lead[]>();
 
   for (const lead of allLeads) {
@@ -943,14 +977,18 @@ export async function deduplicateLeads(mode: "phone_checkout" | "phone" = "phone
     groups.set(key, [...(groups.get(key) ?? []), lead]);
   }
 
-  const duplicateGroups = [...groups.values()].filter((group) => group.length > 1);
+  const duplicateGroups = [...groups.values()].filter((group) => {
+    if (group.length <= 1) return false;
+    if (mode !== "recovered_customer") return true;
+    return group.some((lead) => lead.current_status === "converted" || recoveredLeadIds.has(lead.id));
+  });
   let deleted = 0;
   const kept: string[] = [];
 
   if (hasSupabaseConfig()) {
     const client = supabaseAdmin();
     for (const group of duplicateGroups) {
-      const [winner, ...duplicates] = chooseWinner(group);
+      const [winner, ...duplicates] = chooseWinner(group, recoveredLeadIds);
       const duplicateIds = duplicates.map((lead) => lead.id);
       kept.push(winner.id);
       if (duplicateIds.length === 0) continue;
@@ -966,7 +1004,7 @@ export async function deduplicateLeads(mode: "phone_checkout" | "phone" = "phone
   }
 
   for (const group of duplicateGroups) {
-    const [winner, ...duplicates] = chooseWinner(group);
+    const [winner, ...duplicates] = chooseWinner(group, recoveredLeadIds);
     const duplicateIds = new Set(duplicates.map((lead) => lead.id));
     kept.push(winner.id);
 
@@ -992,16 +1030,20 @@ export async function deduplicateLeads(mode: "phone_checkout" | "phone" = "phone
   return { mode, groups: duplicateGroups.length, deleted, kept };
 }
 
-function duplicateKey(lead: Lead, mode: "phone_checkout" | "phone") {
+function duplicateKey(lead: Lead, mode: "phone_checkout" | "phone" | "recovered_customer") {
   const phone = lead.phone.replace(/\D/g, "");
   if (!phone) return null;
-  if (mode === "phone") return phone;
+  if (mode === "phone" || mode === "recovered_customer") return phone;
   const checkout = (lead.checkout_url ?? "").trim().toLowerCase();
   return checkout ? `${phone}|${checkout}` : phone;
 }
 
-function chooseWinner(group: Lead[]) {
+function chooseWinner(group: Lead[], recoveredLeadIds = new Set<string>()) {
   return [...group].sort((a, b) => {
+    const recovered = Number(recoveredLeadIds.has(b.id)) - Number(recoveredLeadIds.has(a.id));
+    if (recovered !== 0) return recovered;
+    const converted = Number(b.current_status === "converted") - Number(a.current_status === "converted");
+    if (converted !== 0) return converted;
     if (b.lead_score !== a.lead_score) return b.lead_score - a.lead_score;
     const updated = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     if (updated !== 0) return updated;

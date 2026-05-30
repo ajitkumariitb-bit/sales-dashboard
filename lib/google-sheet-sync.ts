@@ -81,7 +81,10 @@ export async function syncGoogleSheet() {
   const { rows } = buildRowsFromSheetValues(values);
 
   const brandRows = rows.filter(matchesAllowedSheetSource);
-  const imported = dedupeImportedRows(brandRows.map(mapSheetRow).filter((row) => row.phone));
+  const syncDays = Math.min(365, Math.max(1, Number(process.env.GOOGLE_SHEET_SYNC_DAYS ?? 60) || 60));
+  const mappedRows = brandRows.map(mapSheetRow).filter((row) => row.phone);
+  const recentRows = mappedRows.filter((row) => isRecentSheetLead(row, syncDays));
+  const imported = dedupeImportedRows(recentRows);
 
   if (hasSupabaseConfig()) {
     const result = await bulkSyncSupabase(imported);
@@ -89,6 +92,7 @@ export async function syncGoogleSheet() {
       imported: result.imported,
       skipped: rows.length - imported.length,
       brandFiltered: rows.length - brandRows.length,
+      dateFiltered: mappedRows.length - recentRows.length,
       mode: "bulk"
     };
   }
@@ -101,8 +105,15 @@ export async function syncGoogleSheet() {
   return {
     imported: results.length,
     skipped: rows.length - results.length,
-    brandFiltered: rows.length - brandRows.length
+    brandFiltered: rows.length - brandRows.length,
+    dateFiltered: mappedRows.length - recentRows.length
   };
+}
+
+function isRecentSheetLead(row: ImportLeadInput, days: number) {
+  if (!row.first_seen_at) return true;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return new Date(row.first_seen_at).getTime() >= cutoff;
 }
 
 function mapSheetRow(row: Record<string, string>): ImportLeadInput {

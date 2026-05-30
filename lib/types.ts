@@ -110,6 +110,8 @@ export type FollowupTask = {
 
 export type LeadFilters = {
   phoneSearch?: string;
+  sortBy?: "date" | "priority" | "cart_value";
+  sortDir?: "asc" | "desc";
   priority?: string;
   rawStage?: string;
   normalizedStage?: string;

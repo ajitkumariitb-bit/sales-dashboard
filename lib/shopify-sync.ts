@@ -46,6 +46,7 @@ export async function syncShopifyOrders() {
   const client = supabaseAdmin();
   const actor = await getConversionUser(client);
   if (!actor) throw new Error("Create at least one admin user before running Shopify sync.");
+  const syncStartedAt = new Date().toISOString();
   const createdAtMin = await getOrderSyncStart(client, days);
 
   let ordersChecked = 0;
@@ -53,6 +54,7 @@ export async function syncShopifyOrders() {
   let converted = 0;
   let skipped = 0;
   let hasMore = false;
+  let maxOrderCreatedAt = createdAtMin;
   const financialStatuses = ["paid", "partially_paid"] as const;
   const checkedOrderIds = new Set<string>();
 
@@ -80,6 +82,9 @@ export async function syncShopifyOrders() {
       if (checkedOrderIds.has(orderKey)) continue;
       checkedOrderIds.add(orderKey);
       ordersChecked += 1;
+      if (order.created_at && new Date(order.created_at).getTime() > new Date(maxOrderCreatedAt).getTime()) {
+        maxOrderCreatedAt = order.created_at;
+      }
       const result = await convertMatchingLead(client, order, actor);
       if (result === "converted") {
         matched += 1;
@@ -96,6 +101,10 @@ export async function syncShopifyOrders() {
     } else {
       await clearSyncCursor(client, cursorKey);
     }
+  }
+
+  if (!hasMore) {
+    await saveSyncCursor(client, "shopify_orders_last_completed_at", maxOrderCreatedAt || syncStartedAt);
   }
 
   return { ordersChecked, matched, converted, skipped, hasMore };
@@ -387,6 +396,22 @@ async function clearSyncCursor(client: SupabaseClient, key: string) {
 }
 
 async function getOrderSyncStart(client: SupabaseClient, fallbackDays: number) {
+  const lastCompletedAt = await getSyncCursor(client, "shopify_orders_last_completed_at");
+  if (lastCompletedAt) {
+    return new Date(new Date(lastCompletedAt).getTime() - 10 * 60 * 1000).toISOString();
+  }
+
+  const { data: latestOrder, error: latestOrderError } = await client
+    .from("orders_recovered")
+    .select("converted_at")
+    .order("converted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestOrderError) throw latestOrderError;
+  if (latestOrder?.converted_at) {
+    return new Date(new Date(String(latestOrder.converted_at)).getTime() - 10 * 60 * 1000).toISOString();
+  }
+
   const fallback = new Date(Date.now() - fallbackDays * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await client
     .from("leads")
