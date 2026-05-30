@@ -427,21 +427,22 @@ export async function getLeadsResult(
 }
 
 export function sortLeads(input: Lead[], viewer?: AppUser, sortBy?: LeadFilters["sortBy"], sortDir: LeadFilters["sortDir"] = "desc"): Lead[] {
+  const activeSort = sortBy ?? (viewer?.role === "salesperson" ? undefined : "date");
   const direction = sortDir === "asc" ? 1 : -1;
   return [...input].sort((a, b) => {
-    if (!sortBy && viewer?.role === "salesperson") {
+    if (!activeSort && viewer?.role === "salesperson") {
       const intent = compareLeadIntent(a.normalized_stage, b.normalized_stage);
       if (intent !== 0) return intent;
     }
-    if (sortBy === "date") {
+    if (activeSort === "date") {
       return (new Date(a.first_seen_at).getTime() - new Date(b.first_seen_at).getTime()) * direction;
     }
-    if (sortBy === "cart_value") {
+    if (activeSort === "cart_value") {
       const valueDiff = ((a.cart_value ?? 0) - (b.cart_value ?? 0)) * direction;
       if (valueDiff !== 0) return valueDiff;
       return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
     }
-    if (sortBy === "priority") {
+    if (activeSort === "priority") {
       const priorityDiff = (a.lead_score - b.lead_score) * direction;
       if (priorityDiff !== 0) return priorityDiff;
       return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
