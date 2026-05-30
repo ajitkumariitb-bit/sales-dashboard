@@ -1,5 +1,6 @@
 import { recoveredRevenueByLead } from "@/lib/recovery";
 import { getCurrentUser, getLeads, getLeadsResult, getRecoveredOrders, getUsers } from "@/lib/store";
+import type { LeadFilters } from "@/lib/types";
 import { BulkAssignForm } from "../components/AssignLeadForm";
 import { LeadTable } from "../components/LeadTable";
 
@@ -17,6 +18,15 @@ function numberValue(params: Record<string, string | string[] | undefined>, key:
   return Number.isFinite(number) ? number : undefined;
 }
 
+function sortByValue(item?: string): NonNullable<LeadFilters["sortBy"]> {
+  if (item === "priority" || item === "cart_value") return item;
+  return "date";
+}
+
+function sortDirValue(item?: string): NonNullable<LeadFilters["sortDir"]> {
+  return item === "asc" ? "asc" : "desc";
+}
+
 export default async function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const [currentUser, users, allLeads, recoveredOrders] = await Promise.all([
@@ -27,6 +37,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
   ]);
   const filters = {
     phoneSearch: value(params, "phoneSearch"),
+    sortBy: sortByValue(value(params, "sortBy")),
+    sortDir: sortDirValue(value(params, "sortDir")),
     priority: value(params, "priority"),
     rawStage: value(params, "rawStage"),
     normalizedStage: value(params, "normalizedStage"),
@@ -77,6 +89,21 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
           <label className="field">
             <span>Phone number</span>
             <input name="phoneSearch" inputMode="numeric" defaultValue={filters.phoneSearch ?? ""} />
+          </label>
+          <label className="field">
+            <span>Sort by</span>
+            <select name="sortBy" defaultValue={filters.sortBy}>
+              <option value="date">Date created</option>
+              <option value="priority">Priority</option>
+              <option value="cart_value">Cart value</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Sort direction</span>
+            <select name="sortDir" defaultValue={filters.sortDir}>
+              <option value="desc">High/new first</option>
+              <option value="asc">Low/old first</option>
+            </select>
           </label>
           <label className="field">
             <span>Priority</span>
