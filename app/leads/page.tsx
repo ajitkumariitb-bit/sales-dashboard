@@ -78,7 +78,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Search
         <div>
           <div className="eyebrow">Lead list</div>
           <h1>Recovery leads</h1>
-          <p className="subtle">Filter by intent, source, owner, status, location, follow-up health, or untouched hot leads.</p>
+          <p className="subtle">Newest leads are shown first by default. Use sort controls for priority, cart value, or date.</p>
         </div>
       </div>
 
