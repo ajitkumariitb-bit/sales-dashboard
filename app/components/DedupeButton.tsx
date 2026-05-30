@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 export function DedupeButton() {
   const router = useRouter();
-  const [mode, setMode] = useState<"phone_checkout" | "phone">("phone_checkout");
+  const [mode, setMode] = useState<"phone_checkout" | "phone" | "recovered_customer">("phone_checkout");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -29,8 +29,13 @@ export function DedupeButton() {
 
   return (
     <div className="actions">
-      <select className="input" value={mode} onChange={(event) => setMode(event.target.value as "phone_checkout" | "phone")}>
+      <select
+        className="input"
+        value={mode}
+        onChange={(event) => setMode(event.target.value as "phone_checkout" | "phone" | "recovered_customer")}
+      >
         <option value="phone_checkout">Same phone + checkout URL</option>
+        <option value="recovered_customer">Same phone after recovery</option>
         <option value="phone">Same phone only</option>
       </select>
       <button className="button" type="button" onClick={runCleanup} disabled={busy}>
