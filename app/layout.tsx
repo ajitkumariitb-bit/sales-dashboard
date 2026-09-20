@@ -32,6 +32,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               {currentUser.role === "admin" ? <Link href="/admin">Admin Dashboard</Link> : null}
               <Link href="/sales">Salesperson Dashboard</Link>
               <Link href="/leads">Lead List</Link>
+              <Link href="/procurement">Procurement &amp; Packing</Link>
               {currentUser.role === "admin" ? <Link href="/manual-leads">Manual Lead</Link> : null}
               {currentUser.role === "admin" ? <Link href="/import">CSV Import</Link> : null}
               {currentUser.role === "admin" ? <Link href="/users">Users</Link> : null}
