@@ -9,6 +9,10 @@ export function middleware(request: NextRequest) {
     publicPaths.some((path) => pathname.startsWith(path)) ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/sync") ||
+    // The mounted procurement application authenticates its own four roles.
+    // CRM user-ID cookies must never grant inventory permissions.
+    pathname === "/procurement/workspace" ||
+    pathname.startsWith("/procurement/workspace/") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico"
   ) {
