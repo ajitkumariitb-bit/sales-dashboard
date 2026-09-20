@@ -1,6 +1,7 @@
 """Durable Shopify inbox. No outbound Shopify mutations."""
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timedelta, timezone
 from .engine import now, encode
 
 TOPICS={'orders/paid','orders/create','orders/updated','orders/cancelled','orders/fulfilled','orders/partially_fulfilled'}
@@ -52,7 +53,8 @@ def process_one(engine, event_id):
                         engine.audit(db,'shopify','order',oid,None,'CANCELLED','CANCELLATION_TOMBSTONE')
                 elif old and old['status']=='CANCELLED':
                     pass
-                elif p.get('financial_status') in {'paid','partially_paid','authorized'} or event['topic']=='orders/paid':
+                else:
+                    # Every Shopify order is confirmed demand, including COD/unpaid.
                     data=normalize(engine,p)
                     if not old:
                         if p.get('fulfillment_status') in {'fulfilled','partial'}:
@@ -82,7 +84,7 @@ def process_one(engine, event_id):
             db.execute("UPDATE webhook_inbox SET status='DONE',error=NULL,processed_at=? WHERE id=?",(now(),event_id))
     except Exception as exc:
         with engine.connect() as db:
-            db.execute("UPDATE webhook_inbox SET status='ERROR',error=? WHERE id=?",(str(exc)[:1000],event_id))
+            db.execute("UPDATE webhook_inbox SET status='ERROR',error=?,processed_at=? WHERE id=?",(str(exc)[:1000],now(),event_id))
 
 
 def enqueue(engine, event_id, topic, shop, payload):
@@ -90,7 +92,14 @@ def enqueue(engine, event_id, topic, shop, payload):
         db.execute('INSERT OR IGNORE INTO webhook_inbox(id,topic,shop,payload,created_at) VALUES(?,?,?,?,?)',(event_id,topic,shop,encode(payload),now()))
 
 
-def process_pending(engine):
+def process_pending(engine, budget_seconds=20):
+    started=time.monotonic()
+    retry_before=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
     with engine.connect() as db:
-        ids=[r[0] for r in db.execute("SELECT id FROM webhook_inbox WHERE status='PENDING' ORDER BY created_at LIMIT 25")]
-    for event_id in ids: process_one(engine,event_id)
+        ids=[r[0] for r in db.execute("SELECT id FROM webhook_inbox WHERE status='PENDING' OR (status='ERROR' AND (processed_at IS NULL OR processed_at<?)) ORDER BY CASE WHEN status='PENDING' THEN 0 ELSE 1 END,COALESCE(processed_at,created_at),created_at LIMIT 25",(retry_before,))]
+    processed=0
+    for event_id in ids:
+        if time.monotonic()-started>=budget_seconds: break
+        process_one(engine,event_id)
+        processed+=1
+    return processed

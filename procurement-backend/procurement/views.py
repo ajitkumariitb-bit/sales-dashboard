@@ -71,6 +71,20 @@ def state(engine, user):
                 received_today=db.execute('SELECT COALESCE(SUM(good),0) FROM goods_receipts WHERE substr(created_at,1,10)=?',(now()[:10],)).fetchone()[0],
                 ready=sum(o['status']=='READY_FOR_PACKING' for o in orders),payment_pending=sum(b['payment'] in {'PAYMENT_REQUESTED','PAYMENT_PENDING','PAYMENT_FAILED'} for b in batches),
                 issues=sum(not i['resolved_at'] for i in issues)))
+        result['intake_attention']=[]
+        if user['role'] in {'ADMIN','PROCUREMENT'}:
+            # Expose operational exceptions, never raw customer/payment payloads.
+            seen=set()
+            for event in engine.rows(db,"SELECT id,payload,error,created_at FROM webhook_inbox WHERE status='ERROR' ORDER BY created_at DESC"):
+                payload=json.loads(event['payload']); oid=str(payload.get('id',''))
+                if oid in seen: continue
+                seen.add(oid)
+                existing=next((o for o in orders if o['id']==oid),None)
+                if existing and existing['status'] in {'CANCELLED','SHIPPED'}: continue
+                result['intake_attention'].append(dict(order_id=oid,number=payload.get('name') or oid,error=event['error'],
+                    created_at=event['created_at'],items=[dict(title=l.get('title') or l.get('name') or 'Product',
+                    quantity=l.get('current_quantity',l.get('quantity',0)),shopify_variant_id=str(l.get('variant_id') or ''))
+                    for l in payload.get('line_items',[]) if l.get('requires_shipping') is not False]))
         if user['role']=='ADMIN':
             result['audit']=engine.rows(db,'SELECT * FROM audit_events ORDER BY seq DESC LIMIT 200')
             result['movements']=engine.rows(db,'SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 200')

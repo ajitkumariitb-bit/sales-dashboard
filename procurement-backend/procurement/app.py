@@ -46,7 +46,7 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
 
     @app.before_request
     def protection():
-        if request.method=='POST' and request.path!='/webhooks/shopify':
+        if request.method=='POST' and request.path not in {'/webhooks/shopify','/internal/process-inbox'}:
             if not session.get('csrf') or not hmac.compare_digest(request.headers.get('X-CSRF-Token',''),session['csrf']): abort(403)
 
     @app.after_request
@@ -197,12 +197,17 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
         payload=json.loads(raw)
         if not isinstance(payload,dict) or 'id' not in payload: abort(400)
         enqueue(engine,shop+':'+event,topic,shop,payload)
-        if serverless:
-            # Finish inside the invocation; never rely on a daemon after response.
-            # Failed processing remains durably queued/error-visible for reconciliation.
-            from .webhooks import process_one
-            process_one(engine,shop+':'+event)
         return jsonify(accepted=True)
+
+    @app.post('/internal/process-inbox')
+    def process_inbox_job():
+        secret=os.getenv('PROCUREMENT_WORKER_SECRET','')
+        if len(secret)<48: abort(503)
+        if not hmac.compare_digest(request.headers.get('Authorization',''),'Bearer '+secret): abort(401)
+        if engine.postgres:
+            from .cloud_catalog import CloudCatalog
+            engine.catalog=CloudCatalog(engine.path)
+        return jsonify(processed=process_pending(engine))
 
     return app
 
