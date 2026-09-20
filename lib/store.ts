@@ -86,7 +86,7 @@ export async function getOptionalCurrentUser(): Promise<AppUser | null> {
   const availableUsers = await getUsers();
   const user = availableUsers.find((item) => item.id === userId);
   if (user) return user;
-  if (!hasSupabaseConfig()) return availableUsers[0] ?? users[0] ?? null;
+  // A logged-out demo request must reach /login, not loop between /login and /admin.
   return null;
 }
 
