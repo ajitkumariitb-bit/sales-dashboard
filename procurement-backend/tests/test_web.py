@@ -62,6 +62,38 @@ class WebTests(unittest.TestCase):
         self.event('1');self.event('2');self.assertEqual(len(self.state()['orders']),1)
         self.assertEqual(self.state()['queue'][0]['required'],1)
 
+    def test_unpaid_cod_creates_demand(self):
+        p=self.payload();p['financial_status']='pending';p['payment_gateway_names']=['Cash on Delivery (COD)']
+        self.event('cod','orders/create',p)
+        self.assertEqual(self.state()['queue'][0]['required'],1)
+
+    def test_failed_mapping_retries_after_backoff(self):
+        p=self.payload();p['line_items'][0]['variant_id']='new-variant'
+        self.event('mapping',payload=p)
+        self.e.catalog.by_shopify['new-variant']='DEMO-B::DEFAULT'
+        self.assertEqual(process_pending(self.e),0)
+        with self.e.connect() as db:
+            db.execute("UPDATE webhook_inbox SET processed_at='2020-01-01T00:00:00+00:00' WHERE id='mapping'")
+        self.assertEqual(process_pending(self.e),1)
+        self.assertEqual(self.state()['queue'][0]['required'],1)
+
+    def test_worker_requires_server_credential(self):
+        enqueue(self.e,'worker','orders/create','test.myshopify.com',self.payload())
+        with patch.dict(os.environ,PROCUREMENT_WORKER_SECRET='w'*64):
+            self.assertEqual(self.client.post('/internal/process-inbox').status_code,401)
+            self.assertEqual(self.client.post('/internal/process-inbox',headers={'Authorization':'Bearer '+'w'*64}).status_code,200)
+        self.assertEqual(len(self.state()['orders']),1)
+
+    def test_webhook_ack_only_persists_without_processing(self):
+        self.e.catalog.demo=False;body=json.dumps(self.payload()).encode();secret='test-secret'
+        headers={'X-Shopify-Hmac-SHA256':base64.b64encode(hmac.new(secret.encode(),body,hashlib.sha256).digest()).decode(),
+                 'X-Shopify-Shop-Domain':'test.myshopify.com','X-Shopify-Topic':'orders/create','X-Shopify-Webhook-Id':'queued'}
+        with patch.dict(os.environ,SHOPIFY_WEBHOOK_SECRET=secret,SHOPIFY_SHOP_DOMAIN='test.myshopify.com'):
+            self.assertEqual(self.client.post('/webhooks/shopify',data=body,headers=headers).status_code,200)
+        self.assertEqual(self.state()['orders'],[])
+        process_pending(self.e)
+        self.assertEqual(len(self.state()['orders']),1)
+
     def test_cancel_before_paid_tombstone(self):
         self.event('cancel','orders/cancelled');self.event('paid')
         self.assertEqual(self.state()['orders'][0]['status'],'CANCELLED');self.assertEqual(self.state()['queue'],[])
@@ -69,6 +101,17 @@ class WebTests(unittest.TestCase):
     def test_unmapped_variant_retryable(self):
         p=self.payload();p['line_items'][0]['variant_id']='missing';self.event('bad',payload=p)
         data=self.state();self.assertEqual(data['orders'],[]);self.assertEqual(data['inbox'][0]['status'],'ERROR')
+
+    def test_procurement_sees_unmapped_order_without_raw_payload(self):
+        p=self.payload();p['line_items'][0].update(variant_id='unmapped',title='Unmapped lamp')
+        p['email']='private@example.test';self.event('unmapped',payload=p)
+        self.e.perform('admin','user',dict(id='buyer',name='Buyer',password='long-test-password',role='PROCUREMENT'),uid('u'))
+        self.client.post('/api/login',json=dict(id='buyer',password='long-test-password'),headers=self.headers)
+        data=self.state()
+        self.assertEqual(data['intake_attention'][0]['number'],'#1001')
+        self.assertEqual(data['intake_attention'][0]['items'][0]['title'],'Unmapped lamp')
+        self.assertNotIn('private@example.test',json.dumps(data))
+        self.assertNotIn('inbox',data)
 
     def test_quantity_edit_and_stale_event(self):
         self.event('paid');p=self.payload(3);p['updated_at']='2026-09-20T10:00:00Z';self.event('edit','orders/updated',p)
