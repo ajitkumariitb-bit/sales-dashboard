@@ -182,7 +182,7 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
                 engine.audit(db,user['id'],'webhook',event_id,old['status'],'PENDING','RETRY')
         if serverless:
             from .webhooks import process_one
-            process_one(engine,event_id)
+            process_one(engine,event_id,storage)
         return jsonify(ok=True)
 
     @app.post('/webhooks/shopify')
@@ -207,16 +207,20 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
         if engine.postgres:
             from .cloud_catalog import CloudCatalog
             engine.catalog=CloudCatalog(engine.path)
-        return jsonify(processed=process_pending(engine))
+        processed=process_pending(engine,storage=storage)
+        if engine.postgres:
+            from .cloud_catalog import CloudCatalog
+            engine.catalog=CloudCatalog(engine.path)
+        return jsonify(processed=processed)
 
     return app
 
 
-def start_worker(engine):
+def start_worker(engine, storage=None):
     stop=threading.Event()
     def run():
         while not stop.is_set():
-            try: process_pending(engine)
+            try: process_pending(engine,storage=storage)
             except Exception:
                 import logging
                 logging.exception('Inbox worker failed; durable events remain retryable')
