@@ -104,6 +104,25 @@ class Engine:
     def outbox(self, db, event, payload):
         db.execute('INSERT INTO catalog_outbox(event_type,payload,created_at) VALUES(?,?,?)',(event,encode(payload),now()))
 
+    def vendor_offer(self, db, variant, data):
+        """Use a catalog vendor, a previously purchased vendor, or an explicitly entered new source."""
+        name=str(data.get('vendor','')).strip()
+        if not name or len(name)>120 or any(ord(char)<32 for char in name):
+            raise ValueError('Enter a vendor name up to 120 characters.')
+        try:
+            return dict(self.catalog.vendor(variant,name),new=False)
+        except ValueError:
+            prior=db.execute('SELECT vendor,supplier_sku,unit_paise FROM batches WHERE variant=? AND vendor=? ORDER BY created_at DESC LIMIT 1',(variant,name)).fetchone()
+            if prior:
+                return dict(id=prior['vendor'],supplier_sku=prior['supplier_sku'],price=prior['unit_paise']/100,
+                    source='PROCUREMENT_HISTORY',new=False)
+            if not data.get('new_vendor'):
+                raise ValueError('This vendor is not in Catalog Intelligence or prior procurement history.')
+            supplier_sku=str(data.get('supplier_sku','')).strip()
+            if len(supplier_sku)>120 or any(ord(char)<32 for char in supplier_sku):
+                raise ValueError('Supplier SKU must be no more than 120 characters.')
+            return dict(id=name,supplier_sku=supplier_sku,source='PROCUREMENT_ENTRY',new=True)
+
     def stock(self, db, variant):
         self.catalog.get(variant)
         db.execute('INSERT OR IGNORE INTO inventory(variant,updated_at) VALUES(?,?)',(variant,now()))
@@ -282,8 +301,8 @@ class Engine:
             self.allocate(db,actor)
             return self.stock(db,d['variant'])
         if action=='purchase':
-            p=self.catalog.get(d['variant']); v=self.catalog.vendor(d['variant'],d['vendor'])
-            quantity=integer(d['quantity'],1); price=money(d['price']); payment=d.get('payment','PAYMENT_PENDING')
+            p=self.catalog.get(d['variant']); quantity=integer(d['quantity'],1); price=money(d['price'])
+            v=self.vendor_offer(db,d['variant'],d); payment=d.get('payment','PAYMENT_PENDING')
             if payment not in PAYMENTS: raise ValueError('Invalid payment state')
             needed=db.execute('SELECT COALESCE(SUM(outstanding),0) FROM requirements WHERE variant=?',(d['variant'],)).fetchone()[0]
             uncovered=max(0,needed-self.stock(db,d['variant'])['incoming'])
@@ -295,6 +314,10 @@ class Engine:
             db.execute('INSERT INTO payment_events VALUES(?,?,?,?,?,?)',(uid('PAY'),bid,None,payment,actor,stamp))
             after=self.one(db,'batches',bid)
             self.audit(db,actor,'batch',bid,None,after,'PURCHASE')
+            if v['new']:
+                self.outbox(db,'VENDOR_RELATIONSHIP_CAPTURED',dict(product_id=p['product_id'],variant=d['variant'],
+                    vendor=v['id'],supplier_sku=v['supplier_sku'],unit_paise=price,batch_id=bid,
+                    verification_status='PENDING_CATALOG_REVIEW'))
             self.outbox(db,'PURCHASE_RECORDED',dict(after,product_id=p['product_id']))
             return after
         if action in {'transit','payment','short_close','batch_edit'}:
@@ -313,7 +336,7 @@ class Engine:
             else:
                 if b['received'] or b['short_closed']: raise ValueError('Received purchase facts cannot be overwritten.')
                 if not d.get('reason'): raise ValueError('Correction reason is required.')
-                v=self.catalog.vendor(b['variant'],d['vendor']); q=integer(d['quantity'],1); price=money(d['price'])
+                v=self.vendor_offer(db,b['variant'],d); q=integer(d['quantity'],1); price=money(d['price'])
                 db.execute('UPDATE batches SET vendor=?,supplier_sku=?,quantity=?,unit_paise=?,updated_at=? WHERE id=?',(v['id'],v['supplier_sku'],q,price,now(),b['id']))
                 db.execute('INSERT INTO price_history VALUES(?,?,?,?,?,?,?,?)',(uid('PRICE'),b['id'],b['variant'],v['id'],price,q,actor,now()))
             after=self.one(db,'batches',b['id'])
@@ -393,7 +416,7 @@ class Engine:
             return {'ok':True}
         if action=='requirement':
             old=self.one(db,'requirements',d['id']); vendor=d.get('vendor')
-            if vendor: self.catalog.vendor(old['variant'],vendor)
+            if vendor: self.vendor_offer(db,old['variant'],d)
             if role!='ADMIN' and any(k in d for k in ['priority','required_by']): raise PermissionError('Only Admin changes priority/due dates.')
             db.execute('UPDATE requirements SET assigned_vendor=?,priority=?,required_by=?,notes=?,updated_at=? WHERE id=?',
                 (vendor or old['assigned_vendor'],integer(d.get('priority',old['priority'])),d.get('required_by',old['required_by']),d.get('notes',old['notes']),now(),old['id']))

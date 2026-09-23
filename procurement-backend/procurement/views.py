@@ -25,12 +25,17 @@ def state(engine, user):
         """)}
         products=[]
         for variant, p in engine.catalog.products.items():
+            vendors=[dict(v,relationship='CATALOG') for v in p.get('vendors',[])]
+            for batch in [b for b in batches if b['variant']==variant]:
+                if not any(v['id']==batch['vendor'] for v in vendors):
+                    vendors.append(dict(id=batch['vendor'],supplier_sku=batch['supplier_sku'],price=batch['unit_paise']/100,
+                        source='PROCUREMENT_HISTORY',relationship='PENDING_CATALOG_REVIEW'))
             i=inv.get(variant,dict(physical=0,damaged=0,availability='AMBER',fresh_photos=0,updated_at=None))
             reserved=sum(r['quantity'] for r in reservations if r['variant']==variant)
             incoming=sum(b['quantity']-b['received'] for b in batches if b['variant']==variant and b['status']!='RECEIVED' and not b['short_closed'])
             approved={a['view_type'] for a in assets if a['variant']==variant and a['approval']=='APPROVED'}
             last=latest_prices.get(variant)
-            products.append(dict(p,**i,reserved=reserved,available=i['physical']-reserved,incoming=incoming,
+            products.append(dict(p,**i,vendors=vendors,reserved=reserved,available=i['physical']-reserved,incoming=incoming,
                 real_images_sufficient=len(approved)>=3 and not i['fresh_photos'],
                 image_url='/api/product-image/'+variant if p['image'] else None,
                 last_purchase_price=last['unit_paise']/100 if last else None))
