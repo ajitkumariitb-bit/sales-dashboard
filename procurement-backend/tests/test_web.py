@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
@@ -36,6 +37,25 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/actions/adjust',json={}).status_code,403)
         self.assertEqual(self.app.test_client().get('/api/state').status_code,401)
         with self.client.get('/') as response: self.assertEqual(response.status_code,200)
+
+    def test_state_query_count_does_not_grow_with_catalog(self):
+        template=next(iter(self.e.catalog.products.values()))
+        for number in range(100):
+            variant=f'EXTRA-{number}::DEFAULT'; product=deepcopy(template)
+            product.update(id=variant,product_id=f'EXTRA-{number}',shopify_variant_id=f'EXTRA-{number}')
+            self.e.catalog.products[variant]=product
+        original_connect=self.e.connect; query_count=0
+        class CountingConnection:
+            def __init__(self,connection): self.connection=connection
+            def __enter__(self): return self
+            def __exit__(self,*args): self.connection.close()
+            def execute(inner,*args,**kwargs):
+                nonlocal query_count
+                query_count+=1
+                return inner.connection.execute(*args,**kwargs)
+        with patch.object(self.e,'connect',side_effect=lambda:CountingConnection(original_connect())):
+            self.assertEqual(self.client.get('/api/state').status_code,200)
+        self.assertLess(query_count,25)
 
     def test_role_data_redaction_and_denial(self):
         self.e.perform('admin','user',dict(id='packing',name='Packer',password='long-test-password',role='PACKING'),uid('u'))
