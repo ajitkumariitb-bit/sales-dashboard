@@ -24,7 +24,13 @@ async function api(url,options={}){
  const headers={'X-CSRF-Token':csrf,...options.headers};
  if(options.body&&!(options.body instanceof FormData))headers['Content-Type']='application/json';
  const res=await fetch(localUrl(url),{...options,headers});
- const data=await res.json();
+ const responseType=res.headers.get('content-type')||'';
+ const responseText=await res.text();
+ let data=null;
+ if(responseType.includes('application/json')){
+  try{data=JSON.parse(responseText);}catch(_error){throw Error(`The server returned incomplete data (${res.status}). Please refresh and try again.`);}
+ }
+ if(data===null)throw Error(`The server returned an unexpected response (${res.status}). Please refresh and try again.`);
  if(!res.ok){if(res.status===401&&url!='/api/login')await boot();throw Error(data.error||'Request failed');}
  return data;
 }

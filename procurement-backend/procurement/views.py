@@ -16,13 +16,20 @@ def state(engine, user):
         reservations=engine.rows(db,"SELECT * FROM reservations WHERE status='ACTIVE'")
         batches=engine.rows(db,'SELECT * FROM batches ORDER BY created_at DESC')
         assets=engine.rows(db,'SELECT * FROM assets ORDER BY uploaded_at DESC')
+        latest_prices={r['variant']:r for r in engine.rows(db,"""
+            SELECT variant,unit_paise,created_at FROM (
+                SELECT variant,unit_paise,created_at,
+                    ROW_NUMBER() OVER (PARTITION BY variant ORDER BY created_at DESC,id DESC) AS row_number
+                FROM price_history
+            ) latest WHERE row_number=1
+        """)}
         products=[]
         for variant, p in engine.catalog.products.items():
             i=inv.get(variant,dict(physical=0,damaged=0,availability='AMBER',fresh_photos=0,updated_at=None))
             reserved=sum(r['quantity'] for r in reservations if r['variant']==variant)
             incoming=sum(b['quantity']-b['received'] for b in batches if b['variant']==variant and b['status']!='RECEIVED' and not b['short_closed'])
             approved={a['view_type'] for a in assets if a['variant']==variant and a['approval']=='APPROVED'}
-            last=db.execute('SELECT unit_paise,created_at FROM price_history WHERE variant=? ORDER BY created_at DESC LIMIT 1',(variant,)).fetchone()
+            last=latest_prices.get(variant)
             products.append(dict(p,**i,reserved=reserved,available=i['physical']-reserved,incoming=incoming,
                 real_images_sufficient=len(approved)>=3 and not i['fresh_photos'],
                 image_url='/api/product-image/'+variant if p['image'] else None,
