@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from procurement.catalog import Catalog
 from procurement.engine import Engine, uid
+from procurement.views import state
 
 A='DEMO-A::DEFAULT'; B='DEMO-B::DEFAULT'
 
@@ -130,6 +131,20 @@ class InventoryTests(unittest.TestCase):
         self.act('batch_edit',dict(id=b['id'],vendor='Demo Artistica',quantity=12,price='1200',reason='Invoice correction'))
         with self.e.connect() as db:
             self.assertEqual([r[0] for r in db.execute('SELECT unit_paise FROM price_history ORDER BY created_at')],[125025,120000])
+
+    def test_purchase_captures_missing_vendor_and_reuses_it(self):
+        self.e.catalog.products[B]['vendors']=[]; self.order()
+        purchase=dict(variant=B,vendor='New Glassworks',supplier_sku='NG-42',quantity=1,price='900',new_vendor=True)
+        first=self.act('purchase',purchase)
+        self.assertEqual((first['vendor'],first['supplier_sku']),('New Glassworks','NG-42'))
+        second=self.act('purchase',dict(variant=B,vendor='New Glassworks',quantity=1,price='925'))
+        self.assertEqual(second['supplier_sku'],'NG-42')
+        screen=state(self.e,dict(id='admin',name='Test Admin',role='ADMIN'))
+        vendor=next(v for v in next(p for p in screen['products'] if p['id']==B)['vendors'] if v['id']=='New Glassworks')
+        self.assertEqual(vendor['relationship'],'PENDING_CATALOG_REVIEW')
+        with self.e.connect() as db:
+            events=[r[0] for r in db.execute('SELECT event_type FROM catalog_outbox ORDER BY seq')]
+        self.assertEqual(events.count('VENDOR_RELATIONSHIP_CAPTURED'),1)
 
     def test_photos_private_until_review(self):
         b=self.buy(); self.receive(b,10)
