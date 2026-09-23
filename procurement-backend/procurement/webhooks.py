@@ -3,8 +3,11 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from .engine import now, encode
+from .shopify_catalog import sync_records, webhook_records
 
-TOPICS={'orders/paid','orders/create','orders/updated','orders/cancelled','orders/fulfilled','orders/partially_fulfilled'}
+ORDER_TOPICS={'orders/paid','orders/create','orders/updated','orders/cancelled','orders/fulfilled','orders/partially_fulfilled'}
+CATALOG_TOPICS={'products/create','products/update'}
+TOPICS=ORDER_TOPICS|CATALOG_TOPICS
 
 
 def normalize(engine, payload):
@@ -30,8 +33,17 @@ def timestamp(value):
     return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp() if value else 0
 
 
-def process_one(engine, event_id):
+def process_one(engine, event_id, storage=None):
     try:
+        with engine.connect() as db:
+            event=engine.one(db,'webhook_inbox',event_id)
+        if event['topic'] in CATALOG_TOPICS:
+            if storage is None:
+                raise ValueError('Shopify catalog sync storage is not configured.')
+            sync_records(engine,webhook_records(json.loads(event['payload'])),storage)
+            with engine.connect() as db:
+                db.execute("UPDATE webhook_inbox SET status='DONE',error=NULL,processed_at=? WHERE id=?",(now(),event_id))
+            return
         with engine.transaction() as db:
             event=engine.one(db,'webhook_inbox',event_id)
             if event['status']=='DONE': return
@@ -92,7 +104,7 @@ def enqueue(engine, event_id, topic, shop, payload):
         db.execute('INSERT OR IGNORE INTO webhook_inbox(id,topic,shop,payload,created_at) VALUES(?,?,?,?,?)',(event_id,topic,shop,encode(payload),now()))
 
 
-def process_pending(engine, budget_seconds=20):
+def process_pending(engine, budget_seconds=20, storage=None):
     started=time.monotonic()
     retry_before=(datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat()
     with engine.connect() as db:
@@ -100,6 +112,6 @@ def process_pending(engine, budget_seconds=20):
     processed=0
     for event_id in ids:
         if time.monotonic()-started>=budget_seconds: break
-        process_one(engine,event_id)
+        process_one(engine,event_id,storage)
         processed+=1
     return processed
