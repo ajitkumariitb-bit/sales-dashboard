@@ -8,23 +8,55 @@ def age(stamp):
     return max(0,round((datetime.now(timezone.utc)-datetime.fromisoformat(stamp.replace('Z','+00:00'))).total_seconds()/3600,1))
 
 
-def state(engine, user):
+def state(engine, user, include_catalog=True):
     with engine.connect() as db:
         db.execute('BEGIN')
-        settings={r['key']:int(r['value']) for r in db.execute('SELECT * FROM settings')}
-        inv={r['variant']:dict(r) for r in db.execute('SELECT * FROM inventory')}
-        reservations=engine.rows(db,"SELECT * FROM reservations WHERE status='ACTIVE'")
-        batches=engine.rows(db,'SELECT * FROM batches ORDER BY created_at DESC')
-        assets=engine.rows(db,'SELECT * FROM assets ORDER BY uploaded_at DESC')
-        latest_prices={r['variant']:r for r in engine.rows(db,"""
+        role=user['role']
+        queries=[
+            ('SELECT * FROM settings',()),
+            ('SELECT * FROM inventory',()),
+            ("SELECT * FROM reservations WHERE status='ACTIVE'",()),
+            ('SELECT * FROM batches ORDER BY created_at DESC',()),
+            ('SELECT * FROM assets ORDER BY uploaded_at DESC',()),
+            ("""
             SELECT variant,unit_paise,created_at FROM (
                 SELECT variant,unit_paise,created_at,
                     ROW_NUMBER() OVER (PARTITION BY variant ORDER BY created_at DESC,id DESC) AS row_number
                 FROM price_history
             ) latest WHERE row_number=1
-        """)}
+            """,()),
+            ('SELECT * FROM orders ORDER BY created_at',()),
+            ('SELECT * FROM requirements WHERE outstanding>0 ORDER BY priority DESC,created_at',()),
+            ('SELECT * FROM order_lines',()),
+            ('SELECT * FROM issues ORDER BY created_at DESC',()),
+            ('SELECT COALESCE(SUM(good),0) AS quantity FROM goods_receipts WHERE substr(created_at,1,10)=?',(now()[:10],)),
+        ]
+        if role in {'ADMIN','PROCUREMENT'}:
+            queries.append(("SELECT id,payload,error,created_at FROM webhook_inbox WHERE status='ERROR' ORDER BY created_at DESC",()))
+        if role=='ADMIN':
+            queries.extend([
+                ('SELECT * FROM audit_events ORDER BY seq DESC LIMIT 200',()),
+                ('SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 200',()),
+                ('SELECT id,name,role,active,created_at FROM users ORDER BY name',()),
+                ('SELECT id,topic,status,error,created_at FROM webhook_inbox ORDER BY created_at DESC LIMIT 100',()),
+                ('SELECT COUNT(*) AS quantity FROM catalog_outbox',()),
+            ])
+        fetched=iter(engine.read_many(db,queries))
+        settings={r['key']:int(r['value']) for r in next(fetched)}
+        inv={r['variant']:r for r in next(fetched)}
+        reservations=next(fetched); batches=next(fetched); assets=next(fetched)
+        latest_prices={r['variant']:r for r in next(fetched)}
+        orders=next(fetched); requirements=next(fetched); lines=next(fetched); issues=next(fetched)
+        received_today=next(fetched)[0]['quantity']
+        error_events=next(fetched) if role in {'ADMIN','PROCUREMENT'} else []
+        if role=='ADMIN':
+            audit=next(fetched); movements=next(fetched); users=next(fetched); inbox=next(fetched)
+            outbox_count=next(fetched)[0]['quantity']
+        active_variants={r['variant'] for rows in [inv.values(),reservations,batches,assets,requirements,lines] for r in rows}
+        catalog_items=engine.catalog.products.items() if include_catalog else (
+            (variant,engine.catalog.products[variant]) for variant in active_variants if variant in engine.catalog.products)
         products=[]
-        for variant, p in engine.catalog.products.items():
+        for variant, p in catalog_items:
             vendors=[dict(v,relationship='CATALOG') for v in p.get('vendors',[])]
             for batch in [b for b in batches if b['variant']==variant]:
                 if not any(v['id']==batch['vendor'] for v in vendors):
@@ -40,9 +72,6 @@ def state(engine, user):
                 image_url='/api/product-image/'+variant if p['image'] else None,
                 last_purchase_price=last['unit_paise']/100 if last else None))
         byid={p['id']:p for p in products}
-        orders=engine.rows(db,'SELECT * FROM orders ORDER BY created_at')
-        requirements=engine.rows(db,'SELECT * FROM requirements WHERE outstanding>0 ORDER BY priority DESC,created_at')
-        lines=engine.rows(db,'SELECT * FROM order_lines')
         incoming_budget={b['id']:b['quantity']-b['received'] for b in batches if b['status']!='RECEIVED' and not b['short_closed']}
         for order in orders:
             order['age_hours']=age(order['created_at']); order['stage_age_hours']=age(order['updated_at'])
@@ -75,19 +104,18 @@ def state(engine, user):
             b['overdue']=b['status']=='PURCHASED' and b['age_hours']>settings['purchased_hours'] or b['status']=='IN_TRANSIT' and (age(b['expected_at'])>0 if b['expected_at'] else b['age_hours']>settings['transit_hours'])
         for a in assets:
             a['url']='/api/assets/'+a['id']; a['title']=byid.get(a['variant'],{}).get('title',a['product_id']); a.pop('filename',None)
-        issues=engine.rows(db,'SELECT * FROM issues ORDER BY created_at DESC')
         result=dict(user={k:user[k] for k in ['id','name','role']},demo=engine.catalog.demo,products=products,orders=orders,queue=queue,batches=batches,
-            issues=issues,assets=assets,settings=settings,generated_at=now(),catalog_count=len(products),
+            issues=issues,assets=assets,settings=settings,generated_at=now(),catalog_count=len(engine.catalog.products),catalog_complete=include_catalog,
             summary=dict(waiting=sum(o['status']=='WAITING_FOR_PROCUREMENT' for o in orders),to_procure=sum(q['to_buy']>0 for q in queue),
                 purchased=sum(b['status']=='PURCHASED' for b in batches),transit=sum(b['status']=='IN_TRANSIT' for b in batches),
-                received_today=db.execute('SELECT COALESCE(SUM(good),0) FROM goods_receipts WHERE substr(created_at,1,10)=?',(now()[:10],)).fetchone()[0],
+                received_today=received_today,
                 ready=sum(o['status']=='READY_FOR_PACKING' for o in orders),payment_pending=sum(b['payment'] in {'PAYMENT_REQUESTED','PAYMENT_PENDING','PAYMENT_FAILED'} for b in batches),
                 issues=sum(not i['resolved_at'] for i in issues)))
         result['intake_attention']=[]
         if user['role'] in {'ADMIN','PROCUREMENT'}:
             # Expose operational exceptions, never raw customer/payment payloads.
             seen=set()
-            for event in engine.rows(db,"SELECT id,payload,error,created_at FROM webhook_inbox WHERE status='ERROR' ORDER BY created_at DESC"):
+            for event in error_events:
                 payload=json.loads(event['payload']); oid=str(payload.get('id',''))
                 if oid in seen: continue
                 seen.add(oid)
@@ -98,11 +126,8 @@ def state(engine, user):
                     quantity=l.get('current_quantity',l.get('quantity',0)),shopify_variant_id=str(l.get('variant_id') or ''))
                     for l in payload.get('line_items',[]) if l.get('requires_shipping') is not False]))
         if user['role']=='ADMIN':
-            result['audit']=engine.rows(db,'SELECT * FROM audit_events ORDER BY seq DESC LIMIT 200')
-            result['movements']=engine.rows(db,'SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 200')
-            result['users']=engine.rows(db,'SELECT id,name,role,active,created_at FROM users ORDER BY name')
-            result['inbox']=engine.rows(db,'SELECT id,topic,status,error,created_at FROM webhook_inbox ORDER BY created_at DESC LIMIT 100')
-            result['outbox_count']=db.execute('SELECT COUNT(*) FROM catalog_outbox').fetchone()[0]
+            result['audit']=audit; result['movements']=movements; result['users']=users; result['inbox']=inbox
+            result['outbox_count']=outbox_count
         if user['role'] in {'SALES','PACKING'}:
             # Price data is removed from every nested object, not merely hidden by CSS.
             def redact(value):
