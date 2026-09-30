@@ -13,6 +13,7 @@ from PIL import Image
 from procurement.app import create_app
 from procurement.catalog import Catalog
 from procurement.engine import Engine, uid
+from procurement.views import state
 from procurement.webhooks import enqueue, process_pending, process_one
 
 
@@ -38,6 +39,11 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.app.test_client().get('/api/state').status_code,401)
         with self.client.get('/') as response: self.assertEqual(response.status_code,200)
 
+    def test_login_ignores_accidental_username_spaces(self):
+        client=self.app.test_client(); csrf=client.get('/api/session').json['csrf']
+        response=client.post('/api/login',json=dict(id=' admin ',password='long-test-password'),headers={'X-CSRF-Token':csrf})
+        self.assertEqual(response.status_code,200)
+
     def test_state_query_count_does_not_grow_with_catalog(self):
         template=next(iter(self.e.catalog.products.values()))
         for number in range(100):
@@ -56,6 +62,15 @@ class WebTests(unittest.TestCase):
         with patch.object(self.e,'connect',side_effect=lambda:CountingConnection(original_connect())):
             self.assertEqual(self.client.get('/api/state').status_code,200)
         self.assertLess(query_count,25)
+
+    def test_compact_state_omits_inactive_catalog_products(self):
+        template=next(iter(self.e.catalog.products.values()))
+        unused=deepcopy(template); unused.update(id='UNUSED::DEFAULT',product_id='UNUSED',shopify_variant_id='UNUSED')
+        self.e.catalog.products['UNUSED::DEFAULT']=unused
+        compact=state(self.e,dict(id='admin',name='Admin',role='ADMIN'),include_catalog=False)
+        self.assertFalse(compact['catalog_complete'])
+        self.assertEqual(compact['catalog_count'],len(self.e.catalog.products))
+        self.assertNotIn('UNUSED::DEFAULT',{product['id'] for product in compact['products']})
 
     def test_role_data_redaction_and_denial(self):
         self.e.perform('admin','user',dict(id='packing',name='Packer',password='long-test-password',role='PACKING'),uid('u'))
