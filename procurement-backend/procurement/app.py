@@ -82,10 +82,12 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
     @app.post('/api/login')
     def login():
         data=request.get_json(); ip=request.remote_addr
+        user_id=str(data.get('id','')).strip()
+        user=None
         if engine.postgres:
             # Persist the account limit across serverless instances. Unknown accounts
             # use the same path and response as known accounts.
-            account=hashlib.sha256(str(data.get('id','')).encode()).hexdigest()
+            account=hashlib.sha256(user_id.encode()).hexdigest()
             with engine.transaction() as db:
                 row=db.execute('SELECT * FROM login_attempts WHERE key=?',(account,)).fetchone()
                 stamp=time.time()
@@ -94,11 +96,13 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
                 count=row['count']+1 if row and stamp-row['started_at']<300 else 1
                 started=row['started_at'] if row and stamp-row['started_at']<300 else stamp
                 db.execute('INSERT INTO login_attempts VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET count=excluded.count,started_at=excluded.started_at',(account,count,started))
+                user=db.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
         with attempts_lock:
             previous=[t for t in attempts.get(ip,[]) if time.time()-t<300]
             if len(previous)>=10: abort(429,description='Too many attempts. Try again in five minutes.')
             attempts[ip]=previous+[time.time()]
-        with engine.connect() as db: user=db.execute('SELECT * FROM users WHERE id=?',(data.get('id',''),)).fetchone()
+        if not engine.postgres:
+            with engine.connect() as db: user=db.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
         if not user or not user['active'] or not check_password_hash(user['password'],data.get('password','')): abort(401,description='Incorrect username or password.')
         session.clear(); session.permanent=True; session['user_id']=user['id']; session['csrf']=secrets.token_hex(24)
         session['auth_tag']=hashlib.sha256(user['password'].encode()).hexdigest()
@@ -109,7 +113,7 @@ def create_app(engine, runtime, testing=False, storage=None, serverless=False):
     def logout(): session.clear(); return jsonify(ok=True)
 
     @app.get('/api/state')
-    def get_state(): return jsonify(state(engine,current_user()))
+    def get_state(): return jsonify(state(engine,current_user(),include_catalog=testing or request.args.get('catalog')=='all'))
 
     @app.post('/api/actions/<action>')
     def action(action):

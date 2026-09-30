@@ -90,6 +90,12 @@ class Engine:
     def rows(self, db, sql, args=()):
         return [dict(r) for r in db.execute(sql,args)]
 
+    def read_many(self, db, queries):
+        """Fetch independent read models in one network pipeline when supported."""
+        if hasattr(db,'read_many'):
+            return [[dict(row) for row in rows] for rows in db.read_many(queries)]
+        return [self.rows(db,sql,args) for sql,args in queries]
+
     def one(self, db, table, key):
         # Table names are internal constants, never supplied by HTTP callers.
         row = db.execute(f'SELECT * FROM {table} WHERE id=?',(key,)).fetchone()

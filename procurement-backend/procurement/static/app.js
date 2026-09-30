@@ -35,7 +35,7 @@ async function api(url,options={}){
  return data;
 }
 function toast(text){$('#toast').textContent=text;$('#toast').classList.add('visible');setTimeout(()=>$('#toast').classList.remove('visible'),4500);}
-async function refresh(){S=await api('/api/state');render();}
+async function refresh(full=Boolean(S?.catalog_complete||['inventory','search'].includes(page))){S=await api('/api/state'+(full?'?catalog=all':''));render();}
 async function action(name,data,key=crypto.randomUUID()){return api('/api/actions/'+name,{method:'POST',body:JSON.stringify(data),headers:{'Idempotency-Key':key}});}
 async function boot(){const session=await api('/api/session');csrf=session.csrf;if(session.authenticated){await refresh();}else login(session.demo);}
 function login(demo){
@@ -47,7 +47,7 @@ function render(){
  if(!S)return;
  const name=[...navItems,...adminItems].find(n=>n[0]===page)?.[2]||'Workspace';
  $('#app').innerHTML=`<div class="shell"><aside class="sidebar"><div class="brand-icon">b</div><div class="brand">BLISS & BIRCH<small>OPERATIONS WORKSPACE</small></div><div class="navlabel">WORKSPACE</div><nav class="nav" aria-label="Main navigation">${nav(navItems)}</nav>${admin()?`<div class="navlabel">MANAGE</div><nav class="nav" aria-label="Admin navigation">${nav(adminItems)}</nav>`:`<div class="navlabel">FOLLOW UP</div><nav class="nav">${nav([['issues','⚑','Issues']])}</nav>`}<div class="sidebar-footer">${BASE?'<a class="linkbutton" href="/procurement">← Sales workspace</a>':''}<div class="userline"><div class="avatar">${esc(S.user.name[0])}</div><div>${esc(S.user.name)}<small>${human(S.user.role)}</small></div></div>${btn('Sign out','logout','','linkbutton')}</div></aside><main class="main"><header class="topbar"><span class="breadcrumb">Workspace &nbsp; / &nbsp; <strong>${name}</strong></span><span class="mobile-title">BLISS & BIRCH</span><div class="top-actions"><form class="searchbox" id="top-search"><span>⌕</span><input aria-label="Search orders, products, vendors" name="query" placeholder="Search orders, products, vendors…" value="${esc(search)}"></form>${S.demo?'<span class="demo-label">DEMO WORKSPACE</span>':'<span class="demo-label">LIVE WORKSPACE</span>'}${btn('↻','refresh','','ghost','aria-label="Refresh workspace"')}<div class="avatar" title="${esc(S.user.name)}">${esc(S.user.name[0])}</div></div></header><div class="content">${content()}<footer class="footnote"><span>Bliss & Birch · Procurement Engine V1</span><span>Physical inventory stays separate from Shopify availability.</span></footer></div></main><nav class="mobile-nav" aria-label="Mobile navigation">${nav(navItems.filter(n=>['home','procure','orders','inventory','search'].includes(n[0])),true)}</nav></div>`;
- const top=$('#top-search');if(top)top.onsubmit=e=>{e.preventDefault();search=new FormData(e.target).get('query');page='search';render();};
+ const top=$('#top-search');if(top)top.onsubmit=async e=>{e.preventDefault();search=new FormData(e.target).get('query');page='search';if(!S.catalog_complete)await refresh(true);else render();};
  const find=$('#global-search');if(find)find.onsubmit=e=>{e.preventDefault();search=new FormData(e.target).get('query');render();};
 }
 function heading(title,sub,actions=''){return `<div class="heading"><div><div class="eyebrow">${page==='home'?'YOUR OPERATIONS, AT A GLANCE':'OPERATIONS WORKSPACE'}</div><h1>${title}</h1><p>${sub}</p></div><div><div class="date">${new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric'}).format(new Date())}</div><div class="heading-actions">${actions}</div></div></div>`;}
@@ -110,14 +110,14 @@ function issueForm(entity,id){modal('Report a problem',`<p>${esc(entity)} · ${e
 function chooseProduct(title,callback){modal(title,select('variant','Product',S.products.map(p=>[p.id,p.title+' · '+p.product_id])),'Continue',async d=>{setTimeout(()=>callback(d.variant),100);});}
 async function handle(button){
  const id=button.dataset.id,a=button.dataset.action;
- if(button.dataset.page){page=button.dataset.page;tab='all';search='';render();window.scrollTo(0,0);return;}
- if(a==='go'){page=id;tab='all';search='';render();return;}
+ if(button.dataset.page){page=button.dataset.page;tab='all';search='';if(['inventory','search'].includes(page)&&!S.catalog_complete)await refresh(true);else render();window.scrollTo(0,0);return;}
+ if(a==='go'){page=id;tab='all';search='';if(['inventory','search'].includes(page)&&!S.catalog_complete)await refresh(true);else render();return;}
  if(a==='close'){$('#modal').close();return;}
  if(a==='refresh'){await refresh();toast('Workspace refreshed.');return;}
  if(a==='logout'){await api('/api/logout',{method:'POST'});await boot();return;}
  if(a==='filter'||a==='home-tab'){tab=id;render();return;}
  if(a==='view-orders'){search=id;page='orders';tab='all';render();return;}
- if(a==='manual'){chooseProduct('New procurement',purchaseForm);return;}
+ if(a==='manual'){if(!S.catalog_complete)await refresh(true);chooseProduct('New procurement',purchaseForm);return;}
  if(a==='purchase'){purchaseForm(id);return;}
  if(a==='receive'){receiveForm(id);return;}
  if(a==='photo'){photoForm(id);return;}
@@ -134,13 +134,13 @@ async function handle(button){
  if(a==='user'){const u=S.users.find(u=>u.id===id);modal(u?'Edit user':'Add user',`${input('id','Username',u?.id||'','text',u?'readonly required':'required')}${input('name','Full name',u?.name||'','text','required')}${select('role','Role',['ADMIN','PROCUREMENT','SALES','PACKING'],u?.role||'PROCUREMENT')}${input('password',u?'New password (leave blank to keep)':'Password (12+ characters)','','password',u?'minlength="12"':'minlength="12" required')}<label class="checkbox"><input name="active" type="checkbox" ${!u||u.active?'checked':''}> Active account</label>`,'Save user',(d,key)=>action('user',{...d,active:!!d.active},key));return;}
  if(a==='thresholds'){modal('Aging thresholds',Object.entries(S.settings).map(([k,v])=>input(k,human(k),v,'number','min="1" step="1" required')).join(''),'Save thresholds',(d,key)=>action('settings',d,key));return;}
  if(a==='retry'){await api('/api/inbox/'+encodeURIComponent(id)+'/retry',{method:'POST'});await refresh();toast('Event queued for retry.');return;}
- if(a==='manual-order'){modal('Accept an offline order',`${input('number','Order reference','','text','required')}${input('customer','Customer','','text','required')}${select('variant','Product',S.products.map(p=>[p.id,p.title+' · '+p.product_id]))}${input('quantity','Quantity',1,'number','min="1" step="1" required')}${note('note','Special notes')}`,'Accept and allocate',(d,key)=>action('order',{id:'OFF-'+key,number:d.number,customer:d.customer,note:d.note,lines:[{id:'1',variant:d.variant,quantity:d.quantity}]},key));return;}
+ if(a==='manual-order'){if(!S.catalog_complete)await refresh(true);modal('Accept an offline order',`${input('number','Order reference','','text','required')}${input('customer','Customer','','text','required')}${select('variant','Product',S.products.map(p=>[p.id,p.title+' · '+p.product_id]))}${input('quantity','Quantity',1,'number','min="1" step="1" required')}${note('note','Special notes')}`,'Accept and allocate',(d,key)=>action('order',{id:'OFF-'+key,number:d.number,customer:d.customer,note:d.note,lines:[{id:'1',variant:d.variant,quantity:d.quantity}]},key));return;}
  if(a==='reallocate'){const lines=S.orders.filter(o=>!['SHIPPED','CANCELLED','PACKED'].includes(o.status)).flatMap(o=>o.lines.map(l=>[l.id,`${o.number} · ${l.title} · ${l.reserved}/${l.quantity} reserved`]));modal('Correct order allocation',`${select('source_line','Move reservation from',lines)}${select('target_line','Move reservation to',lines)}${input('quantity','Quantity',1,'number','min="1" step="1" required')}${note('reason','Reason (required)')}`,'Move reservation',(d,key)=>action('reallocate',d,key));return;}
  if(a==='allocation-problem'||a==='order-quantity'){const lines=S.orders.filter(o=>!['SHIPPED','CANCELLED'].includes(o.status)).flatMap(o=>o.lines.map(l=>[l.id,`${o.number} · ${l.title} · ${l.reserved}/${l.quantity} reserved`]));modal(a==='allocation-problem'?'Reserved item problem':'Correct customer demand',`${select('line_id','Order line',lines)}${input('quantity',a==='allocation-problem'?'Affected reserved units':'Correct total ordered quantity',1,'number','min="1" step="1" required')}${a==='allocation-problem'?select('kind','Problem',['Damaged','Missing']):''}${note('reason','Reason (required)')}`,'Save correction',(d,key)=>action(a==='allocation-problem'?'allocation_problem':'order_quantity',d,key));return;}
- if(a==='verification'){modal('Request future verification',`${select('variant','Product',S.products.map(p=>[p.id,p.title]))}${note('prompt','What needs physical verification?')}`,'Save request',(d,key)=>action('verification',d,key));return;}
+ if(a==='verification'){if(!S.catalog_complete)await refresh(true);modal('Request future verification',`${select('variant','Product',S.products.map(p=>[p.id,p.title]))}${note('prompt','What needs physical verification?')}`,'Save request',(d,key)=>action('verification',d,key));return;}
  if(a==='edit-batch'){const b=batch(id);modal('Correct or close purchase',`${select('mode','Action',[['correct','Correct unreceived purchase'],['close','Short-close remaining delivery']])}${select('vendor','Vendor',b.product.vendors.map(v=>v.id),b.vendor)}${input('quantity','Purchased quantity',b.quantity,'number','min="1" step="1"')}${input('price','Unit price (₹)',b.unit_paise/100,'number','min="0" step="0.01"')}${note('reason','Reason (required)')}<div class="notice">Corrections preserve original price history. Short-closing removes undelivered incoming units; it does not satisfy customer demand.</div>`,'Save correction',(d,key)=>action(d.mode==='close'?'short_close':'batch_edit',{id,...d},key));return;}
 }
 document.addEventListener('click',async e=>{const button=e.target.closest('button[data-action],button[data-page]');if(!button)return;try{await handle(button);}catch(err){toast(err.message);}});
 boot().catch(err=>{$('#app').innerHTML=empty('Could not open the workspace.',esc(err.message));});
 
-setInterval(()=>{if(S&&!$('#modal').open&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)&&!busy)refresh().catch(()=>{});},20000);
+setInterval(()=>{if(S&&!document.hidden&&!$('#modal').open&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)&&!busy)refresh().catch(()=>{});},60000);

@@ -52,6 +52,11 @@ class PostgresConnection:
             return self.raw.execute('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
         return self.raw.execute(translate(sql), args)
 
+    def read_many(self, queries):
+        with self.raw.pipeline():
+            cursors=[self.raw.execute(translate(sql),args) for sql,args in queries]
+        return [cursor.fetchall() for cursor in cursors]
+
     def commit(self):
         self.raw.commit()
 
